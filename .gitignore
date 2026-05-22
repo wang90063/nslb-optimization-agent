@@ -1,0 +1,31 @@
+# Compiled binaries
+solver*
+main
+main_*
+v18
+v22
+v33
+v33_baseline
+v43_ensemble
+v44
+v44_ensemble6
+v45_*
+v46
+v46_restart
+cmp_v56
+cmp_v62
+dbg_jobmax
+debug2
+debug_global
+debug_v80
+tmp_v*
+
+# System
+.DS_Store
+__pycache__/
+
+# Archives
+*.zip
+
+# Local config
+.claude/

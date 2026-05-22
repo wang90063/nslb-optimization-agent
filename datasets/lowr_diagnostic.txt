@@ -1,0 +1,17 @@
+# Low-r diagnostic set.
+# Principle:
+# - Temporary side manifest for `r<=3` search / repair research.
+# - New low-r cases land here first, before any promotion into
+#   `contrast` or `submit_core`.
+# - Focus on `jm==r+1`, `total≈p*r`, `p>=16 & multi-phase`, and
+#   hard-feasible `r=2` structures.
+
+testcases/testcase_param_extreme_r2.txt
+testcases/testcase_param_r2_p32_hot.txt
+testcases/testcase_param_r3_hot.txt
+testcases/testcase_medium_31.txt
+testcases/testcase_lowr_1.txt
+testcases/testcase_lowr_4.txt
+testcases/testcase_lowr_7.txt
+testcases/testcase_lowr_8.txt
+testcases/testcase_lowr_10.txt

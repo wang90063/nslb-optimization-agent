@@ -1,0 +1,8 @@
+# Guardrail set.
+# Principle:
+# - Do not use for primary ranking.
+# - Use to catch timeout risk, extreme runtime regressions, and severe
+#   robustness failures on very hard synthetic distributions.
+
+testcases/testcase_hard_*.txt
+testcases/testcase_ai_*.txt

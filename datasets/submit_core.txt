@@ -1,0 +1,27 @@
+# Main submit-ranking set.
+# Principle:
+# - Keep the historically online-aligned proxy backbone.
+# - Add only the bench/medium anchors that repeatedly tracked true v62-style gains.
+# - Broaden parameter coverage: r=2/3, p=32, n=40, l=100.
+# - 2026-05-21 refresh: add `param_p32_r4_n40` to compensate the
+#   underestimated `v129 -> v138` port-consistency gain seen online.
+
+testcases/testcase_proxy_1.txt
+testcases/testcase_proxy_2.txt
+testcases/testcase_proxy_3.txt
+testcases/testcase_proxy_4.txt
+testcases/testcase_proxy_5.txt
+testcases/testcase_proxy_6.txt
+testcases/testcase_proxy_7.txt
+testcases/testcase_proxy_8.txt
+testcases/testcase_proxy_9.txt
+testcases/testcase_proxy_10.txt
+testcases/testcase_medium_25.txt
+testcases/testcase_medium_32.txt
+testcases/testcase_bench_15.txt
+testcases/testcase_param_r2_p32_hot.txt
+testcases/testcase_param_r3_hot.txt
+testcases/testcase_param_p32_hot.txt
+testcases/testcase_param_p32_r4_n40.txt
+testcases/testcase_param_n40_hot.txt
+testcases/testcase_param_extreme_r2.txt

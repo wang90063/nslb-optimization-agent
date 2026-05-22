@@ -1,0 +1,16 @@
+# Contrast set.
+# Principle:
+# - Keep unresolved split cases that are useful for diagnosis.
+# - These cases can separate local branches, but are not yet trusted enough
+#   to decide submit/no-submit by themselves.
+# - 2026-05-21 refresh: add `medium_29/30` to diagnose why the
+#   `v138/v163` PC line helps medium-style cases online but is still
+#   underrepresented by the older local split set.
+
+testcases/testcase_bench_1.txt
+testcases/testcase_bench_16.txt
+testcases/testcase_proxy_11.txt
+testcases/testcase_proxy_12.txt
+testcases/testcase_medium_29.txt
+testcases/testcase_medium_30.txt
+testcases/testcase_medium_31.txt
