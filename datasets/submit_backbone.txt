@@ -1,0 +1,30 @@
+# Submit backbone set.
+# Purpose:
+# - primary local ranker for submit / no-submit decisions
+# - keep only the historically strongest online-aligned proxy-like backbone
+# - avoid letting narrow anchor families dominate near-neighbor comparisons
+#
+# 2026-05-25 v3 refactor:
+# - split the old `submit_core` into `submit_backbone + submit_anchor`
+# - keep `proxy_1..10 + bench_15` here as the main score-bearing backbone
+#
+# 2026-05-31 v4: promote 6 candidate cases with reliability +2/+3
+# - online_2/6/7/13/14/19 consistently track online direction across v232->v369->v430->v436
+
+testcases/testcase_proxy_1.txt
+testcases/testcase_proxy_2.txt
+testcases/testcase_proxy_3.txt
+testcases/testcase_proxy_4.txt
+testcases/testcase_proxy_5.txt
+testcases/testcase_proxy_6.txt
+testcases/testcase_proxy_7.txt
+testcases/testcase_proxy_8.txt
+testcases/testcase_proxy_9.txt
+testcases/testcase_proxy_10.txt
+testcases/testcase_bench_15.txt
+testcases/testcase_online_2.txt
+testcases/testcase_online_6.txt
+testcases/testcase_online_7.txt
+testcases/testcase_online_13.txt
+testcases/testcase_online_14.txt
+testcases/testcase_online_19.txt

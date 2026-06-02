@@ -1,10 +1,18 @@
-# Main submit-ranking set.
-# Principle:
-# - Keep the historically online-aligned proxy backbone.
-# - Add only the bench/medium anchors that repeatedly tracked true v62-style gains.
-# - Broaden parameter coverage: r=2/3, p=32, n=40, l=100.
-# - 2026-05-21 refresh: add `param_p32_r4_n40` to compensate the
-#   underestimated `v129 -> v138` port-consistency gain seen online.
+# Canonical primary ranking set.
+# This file intentionally matches `submit_backbone.txt` so existing commands that
+# call `datasets/submit_core.txt` continue to work.
+#
+# Read it as:
+# - `submit_core` / `submit_backbone`: main ordering signal
+# - `submit_anchor`: corroboration only
+# - `transfer_holdout`: near-neighbor low-transfer concentration detector
+#
+# 2026-05-25 v3 refactor:
+# - narrow the primary ranking back to the proxy-like backbone
+# - stop letting `medium_25/32 + p32 + param_hot` dominate near-neighbor ordering
+#
+# 2026-05-31 v4: promote 6 candidate cases with reliability +2/+3
+# - online_2/6/7/13/14/19 consistently track online direction across v232->v369->v430->v436
 
 testcases/testcase_proxy_1.txt
 testcases/testcase_proxy_2.txt
@@ -16,12 +24,10 @@ testcases/testcase_proxy_7.txt
 testcases/testcase_proxy_8.txt
 testcases/testcase_proxy_9.txt
 testcases/testcase_proxy_10.txt
-testcases/testcase_medium_25.txt
-testcases/testcase_medium_32.txt
 testcases/testcase_bench_15.txt
-testcases/testcase_param_r2_p32_hot.txt
-testcases/testcase_param_r3_hot.txt
-testcases/testcase_param_p32_hot.txt
-testcases/testcase_param_p32_r4_n40.txt
-testcases/testcase_param_n40_hot.txt
-testcases/testcase_param_extreme_r2.txt
+testcases/testcase_online_2.txt
+testcases/testcase_online_6.txt
+testcases/testcase_online_7.txt
+testcases/testcase_online_13.txt
+testcases/testcase_online_14.txt
+testcases/testcase_online_19.txt

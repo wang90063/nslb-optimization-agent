@@ -1,315 +1,258 @@
 #!/usr/bin/env python3
 """
-NSLB AI Training Communication Pattern Generator
+AI Training Scenario Dataset Generator (v2 - with optimization headroom)
 
-Models real AI training collective communication:
-- Ring AllReduce: each rank sends to next rank in ring, rotating per phase
-- AlltoAll: each rank sends to all other ranks (MoE/Expert Parallelism)
-- Pipeline Parallel: sequential stages, forward + backward pass
-- Hierarchical: intra-group (TP) + inter-group (DP) communication
+设计目标：产生 v199 无法达到结构性下界的 case，暴露真正的优化空间。
+关键改进：重叠 group + 热点 leaf + 非均匀 phase mask
 
-Key insight from NSLB article: AI training flows are:
-- Few per GPU but large ("elephant flows")
-- Deterministic and periodic (same pattern each iteration)
-- Synchronized burst
-- Structured by collective algorithm (Ring, Tree, etc.)
+约束: n<=40, l<=100, p<=32, r<=4, m<=31, f<=12800
 """
 import random
 import os
 
+OUTPUT_DIR = "testcases"
 
-def gen_ring_allreduce(l, p, r, m, n_ranks, density=1.0):
-    """Ring AllReduce: rank i sends to rank (i+1)%N, shifts each phase.
-    
-    In real Ring AllReduce with N ranks and data split into N chunks:
-    - Phase k: rank i sends chunk (i-k)%N to rank (i+1)%N
-    - Each rank sends to the SAME next rank every phase (same src-dst pair)
-    - But the data chunk changes, so it's the same flow repeated
-    
-    For load balancing challenge: we model multiple rings overlapping.
+
+def build_phase_flows(all_flows, m):
+    """Convert (src, dst, mask) list to per-phase flow lists, padded."""
+    phase_flows = [[] for _ in range(m)]
+    for src, dst, mask in all_flows:
+        for ph in range(m):
+            if (mask >> ph) & 1:
+                phase_flows[ph].append((src, dst))
+    f = max((len(pf) for pf in phase_flows), default=0)
+    dummy = (0, 0)
+    for ph in range(m):
+        while len(phase_flows[ph]) < f:
+            phase_flows[ph].append(dummy)
+    return f, phase_flows
+
+
+def gen_hotspot_ring(l, p, r, m, hot_leafs, n_cold, fpp, phase_spread):
+    """Ring with shared hot leafs + unique cold leafs per job."""
+    pr = p * r
+    cold_pool = [x for x in range(l) if x not in hot_leafs]
+    random.shuffle(cold_pool)
+    cold = cold_pool[:n_cold]
+    group = list(hot_leafs) + cold
+    random.shuffle(group)
+
+    n_phases = max(2, int(m * phase_spread))
+    start_ph = random.randint(0, m - 1)
+    mask = 0
+    for k in range(n_phases):
+        mask |= (1 << ((start_ph + k) % m))
+
+    all_flows = []
+    for i in range(len(group)):
+        sl, dl = group[i], group[(i + 1) % len(group)]
+        if sl == dl:
+            continue
+        for _ in range(fpp):
+            src = sl * pr + random.randint(0, pr - 1)
+            dst = dl * pr + random.randint(0, pr - 1)
+            all_flows.append((src, dst, mask))
+    return build_phase_flows(all_flows, m)
+
+
+def gen_asymmetric_alltoall(l, p, r, m, hot_leafs, n_cold, fpp):
+    """All-to-all where hot leafs send/receive 2x more flows."""
+    pr = p * r
+    cold_pool = [x for x in range(l) if x not in hot_leafs]
+    random.shuffle(cold_pool)
+    cold = cold_pool[:n_cold]
+    active = list(hot_leafs) + cold
+
+    n_phases = random.randint(m * 2 // 3, m)
+    start_ph = random.randint(0, m - 1)
+    mask = 0
+    for k in range(n_phases):
+        mask |= (1 << ((start_ph + k) % m))
+
+    all_flows = []
+    for sl in active:
+        is_hot = sl in hot_leafs
+        n_targets = min(len(active) - 1, 4 if is_hot else 2)
+        peers = [x for x in active if x != sl]
+        targets = random.sample(peers, n_targets)
+        mult = 2 if is_hot else 1
+        for dl in targets:
+            for _ in range(fpp * mult):
+                src = sl * pr + random.randint(0, pr - 1)
+                dst = dl * pr + random.randint(0, pr - 1)
+                all_flows.append((src, dst, mask))
+    return build_phase_flows(all_flows, m)
+
+
+def gen_staggered_ring(l, p, r, m, hot_leafs, n_cold, fpp):
+    """Ring where each edge has a different phase mask (staggered sync)."""
+    pr = p * r
+    cold_pool = [x for x in range(l) if x not in hot_leafs]
+    random.shuffle(cold_pool)
+    cold = cold_pool[:n_cold]
+    group = list(hot_leafs) + cold
+    random.shuffle(group)
+
+    all_flows = []
+    for i in range(len(group)):
+        sl, dl = group[i], group[(i + 1) % len(group)]
+        if sl == dl:
+            continue
+        n_phases = random.randint(m // 2, m * 3 // 4)
+        start_ph = (i * m // len(group)) % m
+        mask = 0
+        for k in range(n_phases):
+            mask |= (1 << ((start_ph + k) % m))
+        for _ in range(fpp):
+            src = sl * pr + random.randint(0, pr - 1)
+            dst = dl * pr + random.randint(0, pr - 1)
+            all_flows.append((src, dst, mask))
+    return build_phase_flows(all_flows, m)
+
+
+def gen_star_hotspot(l, p, r, m, hot_leafs, n_spokes, fpp, phase_spread):
+    """Star topology: each hot leaf communicates with n_spokes other leafs.
+
+    Creates many flows per hot leaf per job (n_spokes * fpp * 2 directions),
+    forcing the greedy to use many ports on the hot leaf. When multiple jobs
+    share the same hot leafs, local balance (spread across ports to avoid
+    per-phase overload) conflicts with global balance (avoid already-loaded ports).
     """
     pr = p * r
+    cold_pool = [x for x in range(l) if x not in hot_leafs]
+    random.shuffle(cold_pool)
+    spokes = cold_pool[:n_spokes]
+
+    n_phases = max(2, int(m * phase_spread))
+    start_ph = random.randint(0, m - 1)
+    mask = 0
+    for k in range(n_phases):
+        mask |= (1 << ((start_ph + k) % m))
+
     all_flows = []
-    # Place ranks on leafs: each leaf has pr cards
-    ranks_per_leaf = pr
-    total_cards = l * pr
-    if n_ranks > total_cards:
-        n_ranks = total_cards
-    
-    # Assign ranks to cards
-    rank_cards = list(range(n_ranks))
-    random.shuffle(rank_cards)
-    
-    # Multiple rings for redundancy (like NCCL's multiple channels)
-    n_rings = max(1, int(p * density))
-    
-    for ph in range(m):
-        flows = []
-        for ring in range(n_rings):
-            for i in range(n_ranks):
-                src_card = rank_cards[i]
-                dst_card = rank_cards[(i + 1 + ring) % n_ranks]
-                src_leaf = src_card // pr
-                dst_leaf = dst_card // pr
-                if src_leaf == dst_leaf:
-                    continue
-                flows.append((src_card, dst_card))
-        all_flows.append(flows if flows else [(0, pr)])
-    return all_flows
+    for hub in hot_leafs:
+        for spoke in spokes:
+            for _ in range(fpp):
+                src = hub * pr + random.randint(0, pr - 1)
+                dst = spoke * pr + random.randint(0, pr - 1)
+                all_flows.append((src, dst, mask))
+            for _ in range(fpp):
+                src = spoke * pr + random.randint(0, pr - 1)
+                dst = hub * pr + random.randint(0, pr - 1)
+                all_flows.append((src, dst, mask))
+    return build_phase_flows(all_flows, m)
 
 
-def gen_alltoall(l, p, r, m, n_ranks, density=1.0):
-    """AlltoAll: each rank sends to every other rank.
-    
-    Used in MoE (Expert Parallelism) - each token goes to its expert.
-    Creates massive cross-traffic. Phases represent different micro-batches.
-    """
-    pr = p * r
-    all_flows = []
-    total_cards = l * pr
-    if n_ranks > total_cards:
-        n_ranks = total_cards
-    
-    rank_cards = random.sample(range(total_cards), n_ranks)
-    
-    # In each phase, subset of ranks communicate (simulating micro-batches)
-    active_frac = min(1.0, density * p / n_ranks)
-    
-    for ph in range(m):
-        flows = []
-        # Each rank sends to a subset of other ranks
-        for i in range(n_ranks):
-            n_targets = max(1, int(n_ranks * active_frac))
-            targets = random.sample(range(n_ranks), min(n_targets, n_ranks))
-            for j in targets:
-                if i == j:
-                    continue
-                src_card = rank_cards[i]
-                dst_card = rank_cards[j]
-                if src_card // pr == dst_card // pr:
-                    continue
-                flows.append((src_card, dst_card))
-        all_flows.append(flows if flows else [(0, pr)])
-    return all_flows
+def write_testcase(path, n, l, p, r, jobs):
+    """Write testcase in NSLB format."""
+    with open(path, 'w') as out:
+        out.write(f"{n} {l} {p} {r}\n")
+        for m, f, phase_flows in jobs:
+            out.write(f"{m} {f}\n")
+            for ph in range(m):
+                line = ' '.join(f"{src} {dst}" for src, dst in phase_flows[ph])
+                out.write(line + '\n')
 
 
-def gen_pipeline_parallel(l, p, r, m, n_stages, ranks_per_stage, density=1.0):
-    """Pipeline Parallelism: sequential stages, forward + backward.
-    
-    Stage i sends to stage i+1 (forward) and stage i-1 (backward).
-    Each stage has multiple ranks (data parallel within stage).
-    """
-    pr = p * r
-    all_flows = []
-    total_cards = l * pr
-    total_ranks = n_stages * ranks_per_stage
-    if total_ranks > total_cards:
-        ranks_per_stage = max(1, total_cards // n_stages)
-        total_ranks = n_stages * ranks_per_stage
-    
-    # Assign ranks to cards, grouping stages on nearby leafs
-    all_cards = list(range(min(total_ranks, total_cards)))
-    random.shuffle(all_cards)
-    stages = []
-    for s in range(n_stages):
-        stage_cards = all_cards[s*ranks_per_stage:(s+1)*ranks_per_stage]
-        stages.append(stage_cards)
-    
-    n_flows_per_pair = max(1, int(p * r * density / ranks_per_stage))
-    
-    for ph in range(m):
-        flows = []
-        # Forward pass: stage i -> stage i+1
-        if ph < m // 2:
-            active_stage = ph % (n_stages - 1)
-            for src_card in stages[active_stage]:
-                for dst_card in stages[active_stage + 1]:
-                    if src_card // pr == dst_card // pr:
-                        continue
-                    for _ in range(n_flows_per_pair):
-                        flows.append((src_card, dst_card))
+CASES = [
+    # --- Star hotspot: many flows per hot leaf, local-vs-global conflict ---
+    {"id": 1, "n": 30, "l": 32, "p": 16, "r": 2,
+     "m_range": (24, 28), "topo": "star_hotspot",
+     "n_hot": 2, "n_spokes": 6, "fpp": 3, "phase_spread": 0.7,
+     "desc": "r2, star 2 hubs x 6 spokes, fpp3"},
+    {"id": 2, "n": 35, "l": 32, "p": 16, "r": 2,
+     "m_range": (24, 28), "topo": "star_hotspot",
+     "n_hot": 2, "n_spokes": 8, "fpp": 3, "phase_spread": 0.75,
+     "desc": "r2, star 2 hubs x 8 spokes, high density"},
+    {"id": 3, "n": 40, "l": 32, "p": 16, "r": 2,
+     "m_range": (22, 26), "topo": "star_hotspot",
+     "n_hot": 3, "n_spokes": 6, "fpp": 2, "phase_spread": 0.65,
+     "desc": "r2, star 3 hubs x 6 spokes, n40"},
+    {"id": 4, "n": 30, "l": 32, "p": 32, "r": 2,
+     "m_range": (24, 28), "topo": "star_hotspot",
+     "n_hot": 2, "n_spokes": 10, "fpp": 4, "phase_spread": 0.7,
+     "desc": "r2 p32, star 2 hubs x 10 spokes"},
+    # --- Hotspot ring + staggered for comparison ---
+    {"id": 5, "n": 40, "l": 32, "p": 16, "r": 2,
+     "m_range": (24, 28), "topo": "hotspot_ring",
+     "n_hot": 4, "n_cold": 4, "fpp": 3, "phase_spread": 0.7,
+     "desc": "r2, hotspot ring baseline"},
+    {"id": 6, "n": 35, "l": 32, "p": 16, "r": 2,
+     "m_range": (24, 28), "topo": "staggered_ring",
+     "n_hot": 4, "n_cold": 5, "fpp": 4,
+     "desc": "r2, staggered ring baseline"},
+    # --- Star hotspot with r=4 (should have more room) ---
+    {"id": 7, "n": 40, "l": 32, "p": 16, "r": 4,
+     "m_range": (22, 26), "topo": "star_hotspot",
+     "n_hot": 2, "n_spokes": 8, "fpp": 4, "phase_spread": 0.7,
+     "desc": "r4, star 2 hubs x 8 spokes, moderate"},
+    {"id": 8, "n": 35, "l": 32, "p": 16, "r": 2,
+     "m_range": (26, 31), "topo": "star_hotspot",
+     "n_hot": 2, "n_spokes": 10, "fpp": 4, "phase_spread": 0.8,
+     "desc": "r2, star 2 hubs x 10 spokes, extreme m"},
+]
+
+
+def generate_case(case_def, seed_base=42):
+    n = case_def["n"]
+    l = case_def["l"]
+    p = case_def["p"]
+    r = case_def["r"]
+    m_lo, m_hi = case_def["m_range"]
+    topo = case_def["topo"]
+    n_hot = case_def["n_hot"]
+    n_cold = case_def.get("n_cold", 0)
+    fpp = case_def["fpp"]
+
+    random.seed(seed_base + case_def["id"])
+    hot_leafs = set(random.sample(range(l), n_hot))
+    base_m = random.randint(m_lo, m_hi)
+    n_cold = case_def.get("n_cold", 0)
+
+    jobs = []
+    for job_idx in range(n):
+        m = base_m + random.randint(-1, 1)
+        m = max(m_lo, min(m_hi, m))
+
+        if topo == "hotspot_ring":
+            f, pf = gen_hotspot_ring(l, p, r, m, hot_leafs, n_cold,
+                                     fpp, case_def["phase_spread"])
+        elif topo == "asym_alltoall":
+            f, pf = gen_asymmetric_alltoall(l, p, r, m, hot_leafs,
+                                            n_cold, fpp)
+        elif topo == "staggered_ring":
+            f, pf = gen_staggered_ring(l, p, r, m, hot_leafs, n_cold, fpp)
+        elif topo == "star_hotspot":
+            f, pf = gen_star_hotspot(l, p, r, m, hot_leafs,
+                                     case_def["n_spokes"], fpp,
+                                     case_def["phase_spread"])
         else:
-            # Backward pass: stage i -> stage i-1
-            active_stage = (m - 1 - ph) % (n_stages - 1) + 1
-            for src_card in stages[active_stage]:
-                for dst_card in stages[active_stage - 1]:
-                    if src_card // pr == dst_card // pr:
-                        continue
-                    for _ in range(n_flows_per_pair):
-                        flows.append((src_card, dst_card))
-        all_flows.append(flows if flows else [(0, pr)])
-    return all_flows
+            raise ValueError(f"Unknown topology: {topo}")
+
+        if f > 12800:
+            for ph in range(m):
+                pf[ph] = pf[ph][:12800]
+            f = 12800
+        jobs.append((m, f, pf))
+    return n, l, p, r, jobs
 
 
-def gen_hierarchical_dp_tp(l, p, r, m, n_groups, ranks_per_group, density=1.0):
-    """Hierarchical: TP within group + DP AllReduce across groups.
-    
-    Models real training where:
-    - TP group (8 GPUs on same node) does AllReduce locally
-    - DP across nodes does Ring AllReduce for gradient sync
-    """
-    pr = p * r
-    all_flows = []
-    total_cards = l * pr
-    total_ranks = n_groups * ranks_per_group
-    if total_ranks > total_cards:
-        n_groups = max(2, total_cards // ranks_per_group)
-        total_ranks = n_groups * ranks_per_group
-    
-    all_cards = list(range(min(total_ranks, total_cards)))
-    groups = []
-    for g in range(n_groups):
-        group_cards = all_cards[g*ranks_per_group:(g+1)*ranks_per_group]
-        groups.append(group_cards)
-    
-    for ph in range(m):
-        flows = []
-        if ph % 3 < 2:
-            # DP phase: ring allreduce across groups (rank 0 of each group)
-            dp_rank = ph % ranks_per_group
-            ring_cards = [groups[g][dp_rank] for g in range(n_groups)]
-            for i in range(len(ring_cards)):
-                src = ring_cards[i]
-                dst = ring_cards[(i+1) % len(ring_cards)]
-                if src // pr == dst // pr:
-                    continue
-                for _ in range(max(1, int(p * density))):
-                    flows.append((src, dst))
-        else:
-            # TP phase: allreduce within each group (cross-leaf only)
-            for group in groups:
-                for i in range(len(group)):
-                    dst = group[(i+1) % len(group)]
-                    src = group[i]
-                    if src // pr == dst // pr:
-                        continue
-                    flows.append((src, dst))
-        all_flows.append(flows if flows else [(0, pr)])
-    return all_flows
-
-
-def write_job(f, m, all_flows, max_f_cap=12800):
-    deduped = []
-    for flows in all_flows:
-        seen = set()
-        unique = []
-        for pair in flows:
-            if pair not in seen:
-                seen.add(pair)
-                unique.append(pair)
-        deduped.append(unique)
-    max_f = max(len(fl) for fl in deduped)
-    max_f = min(max(max_f, 1), max_f_cap)
-    f.write(f"{m} {max_f}\n")
-    for flows in deduped:
-        while len(flows) < max_f:
-            flows.append(flows[random.randint(0, len(flows) - 1)])
-        flows = flows[:max_f]
-        parts = []
-        for src, dst in flows:
-            parts.extend([str(src), str(dst)])
-        f.write(" ".join(parts) + "\n")
-
-
-def generate_ai_training(filename, n, l, p, r, seed=42, config=None):
-    random.seed(seed)
-    if config is None:
-        config = {}
-    
-    density = config.get('density', 1.0)
-    m_range = config.get('m_range', (8, 20))
-    pattern = config.get('pattern', 'mixed')
-    
-    pr = p * r
-    total_cards = l * pr
-    
-    with open(filename, 'w') as f:
-        f.write(f"{n} {l} {p} {r}\n")
-        for job_idx in range(n):
-            m = random.randint(m_range[0], min(m_range[1], 31))
-            
-            if pattern == 'ring':
-                n_ranks = random.randint(max(4, total_cards//4), total_cards)
-                all_flows = gen_ring_allreduce(l, p, r, m, n_ranks, density)
-            elif pattern == 'alltoall':
-                n_ranks = random.randint(8, min(64, total_cards))
-                all_flows = gen_alltoall(l, p, r, m, n_ranks, density)
-            elif pattern == 'pipeline':
-                n_stages = random.randint(4, 8)
-                rps = random.randint(4, min(16, total_cards // n_stages))
-                all_flows = gen_pipeline_parallel(l, p, r, m, n_stages, rps, density)
-            elif pattern == 'hierarchical':
-                n_groups = random.randint(4, min(16, l))
-                rpg = random.randint(4, min(pr, 16))
-                all_flows = gen_hierarchical_dp_tp(l, p, r, m, n_groups, rpg, density)
-            else:  # mixed
-                roll = random.random()
-                if roll < 0.35:
-                    n_ranks = random.randint(max(4, total_cards//4), total_cards)
-                    all_flows = gen_ring_allreduce(l, p, r, m, n_ranks, density)
-                elif roll < 0.60:
-                    n_ranks = random.randint(8, min(64, total_cards))
-                    all_flows = gen_alltoall(l, p, r, m, n_ranks, density)
-                elif roll < 0.80:
-                    n_stages = random.randint(4, 8)
-                    rps = random.randint(4, min(16, total_cards // max(1, n_stages)))
-                    all_flows = gen_pipeline_parallel(l, p, r, m, n_stages, rps, density)
-                else:
-                    n_groups = random.randint(4, min(16, l))
-                    rpg = random.randint(4, min(pr, 16))
-                    all_flows = gen_hierarchical_dp_tp(l, p, r, m, n_groups, rpg, density)
-            
-            write_job(f, m, all_flows)
+def main():
+    os.makedirs(OUTPUT_DIR, exist_ok=True)
+    print("Generating AI training testcases (v2 - hotspot)...")
+    for case_def in CASES:
+        cid = case_def["id"]
+        path = os.path.join(OUTPUT_DIR, f"testcase_aitrain_{cid}.txt")
+        n, l, p, r, jobs = generate_case(case_def)
+        write_testcase(path, n, l, p, r, jobs)
+        f_vals = [f for _, f, _ in jobs]
+        m_vals = [m for m, _, _ in jobs]
+        print(f"  aitrain_{cid}: n={n} l={l} p={p} r={r} "
+              f"m=[{min(m_vals)}-{max(m_vals)}] "
+              f"f=[{min(f_vals)}-{max(f_vals)}, avg={sum(f_vals)//n}] "
+              f"-- {case_def['desc']}")
+    print("\nDone.")
 
 
 if __name__ == "__main__":
-    root_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    outdir = os.path.join(root_dir, "testcases")
-    os.makedirs(outdir, exist_ok=True)
-    
-    ai_configs = [
-        # Ring AllReduce - the most common pattern
-        (33, 32, 16, 4, 30, 801, {'density': 1.0, 'm_range': (8, 20), 'pattern': 'ring'},
-         "Ring AllReduce p=16 n=30"),
-        (34, 32, 8, 4, 30, 802, {'density': 1.0, 'm_range': (10, 22), 'pattern': 'ring'},
-         "Ring AllReduce p=8 n=30"),
-        # AlltoAll (MoE) - creates massive cross-traffic
-        (35, 32, 16, 4, 25, 803, {'density': 0.5, 'm_range': (8, 16), 'pattern': 'alltoall'},
-         "AlltoAll (MoE) p=16"),
-        (36, 64, 8, 4, 30, 804, {'density': 0.3, 'm_range': (8, 16), 'pattern': 'alltoall'},
-         "AlltoAll (MoE) l=64 p=8"),
-        # Pipeline Parallel
-        (37, 32, 16, 4, 25, 805, {'density': 1.0, 'm_range': (10, 20), 'pattern': 'pipeline'},
-         "Pipeline p=16"),
-        (38, 64, 8, 4, 30, 806, {'density': 1.0, 'm_range': (10, 22), 'pattern': 'pipeline'},
-         "Pipeline l=64 p=8"),
-        # Hierarchical (TP+DP)
-        (39, 32, 16, 4, 30, 807, {'density': 1.0, 'm_range': (10, 20), 'pattern': 'hierarchical'},
-         "Hierarchical TP+DP p=16"),
-        # Mixed (realistic multi-tenant)
-        (40, 32, 8, 4, 35, 808, {'density': 1.0, 'm_range': (10, 25), 'pattern': 'mixed'},
-         "Mixed multi-tenant p=8 n=35"),
-    ]
-    
-    print("=" * 70)
-    print("NSLB AI Training Communication Pattern Benchmark")
-    print("=" * 70)
-    for case, l, p, r, n, seed, cfg, desc in ai_configs:
-        filename = os.path.join(outdir, f'testcase_ai_{case}.txt')
-        generate_ai_training(filename, n, l, p, r, seed, cfg)
-        
-        with open(filename) as fh:
-            lines = [ln.strip() for ln in fh if ln.strip()]
-        idx = 1
-        total_flows = 0
-        for _ in range(n):
-            header = lines[idx].split()
-            m_j, f_j = int(header[0]), int(header[1])
-            total_flows += f_j
-            idx += 1 + m_j
-        
-        print(f"  Case {case}: l={l:<3d} p={p:<2d} r={r} n={n:<2d}"
-              f" | flows={total_flows:>6d} avg={total_flows//n:>5d} | {desc}")
-    
-    print("=" * 70)
-    print("\nScore: python3 scorer.py ./solver testcases/testcase_ai_*.txt")
+    main()

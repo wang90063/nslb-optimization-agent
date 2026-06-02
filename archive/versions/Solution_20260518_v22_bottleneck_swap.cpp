@@ -1,7 +1,18 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
+#if defined(_WIN32) || defined(_WIN64)
+#define FAST_GET_CHAR getchar
+#else
 #define FAST_GET_CHAR getchar_unlocked
+#endif
+#define OUT_BUF_SIZE 1048576
+static char out_buf[OUT_BUF_SIZE];
+static int out_pos = 0;
+inline void flush_out(){if(out_pos>0){fwrite(out_buf,1,out_pos,stdout);out_pos=0;}}
+inline void write_char(char c){if(out_pos==OUT_BUF_SIZE)flush_out();out_buf[out_pos++]=c;}
+inline void fast_write(int x){if(x<0){write_char('-');x=-x;}if(x==0){write_char('0');return;}char t[12];int l=0;while(x){t[l++]=(x%10)+'0';x/=10;}while(l--)write_char(t[l]);}
+inline int fast_read_int(){int c=FAST_GET_CHAR();while(c<'0'||c>'9')c=FAST_GET_CHAR();int x=0;while(c>='0'&&c<='9'){x=x*10+(c-'0');c=FAST_GET_CHAR();}return x;}
 #define MAX_CARDS 12800
 #define MAX_FLOWS 400000
 #define MAX_LEAFS 100
@@ -18,7 +29,6 @@ static int ht_used_cnt;
 inline void ht_clear(){for(int i=0;i<ht_used_cnt;++i)ht_key[ht_used[i]]=-1;ht_used_cnt=0;}
 inline int ht_find(int k){unsigned h=(unsigned)k;h=((h>>16)^h)*0x45d9f3b;h=((h>>16)^h)*0x45d9f3b;h=(h>>16)^h;int p=h&HT_MASK;while(1){if(ht_key[p]==k)return ht_val[p];if(ht_key[p]==-1)return -1;p=(p+1)&HT_MASK;}}
 inline void ht_insert(int k,int v){unsigned h=(unsigned)k;h=((h>>16)^h)*0x45d9f3b;h=((h>>16)^h)*0x45d9f3b;h=(h>>16)^h;int p=h&HT_MASK;while(ht_key[p]!=-1)p=(p+1)&HT_MASK;ht_key[p]=k;ht_val[p]=v;ht_used[ht_used_cnt++]=p;}
-inline int fast_read_int(){int c=FAST_GET_CHAR();while(c<'0'||c>'9')c=FAST_GET_CHAR();int x=0;while(c>='0'&&c<='9'){x=x*10+(c-'0');c=FAST_GET_CHAR();}return x;}
 static int fl_src[MAX_FLOWS],fl_dst[MAX_FLOWS];
 static unsigned int fl_pmask[MAX_FLOWS];
 static short fl_port[MAX_FLOWS];
@@ -30,7 +40,18 @@ static int global_in[MAX_LEAFS][MAX_PORTS];
 static int g_l,g_p,g_r,g_pr;
 static int fl_sl[MAX_FLOWS],fl_dl[MAX_FLOWS];
 
-void solve_job(int job_idx){
+inline int get_job_max(int m){
+    int mx=0;
+    for(int leaf=0;leaf<g_l;++leaf)
+        for(int pk=0;pk<g_p;++pk)
+            for(int ph=0;ph<m;++ph){
+                int o=out_load[leaf][pk][ph];if(o>mx)mx=o;
+                int iv=in_load[leaf][pk][ph];if(iv>mx)mx=iv;
+            }
+    return mx;
+}
+
+void solve_job(){
     int m=fast_read_int(),f=fast_read_int();
     fl_count=0; ht_clear();
     for(int ph=0;ph<m;++ph)
@@ -51,11 +72,13 @@ void solve_job(int job_idx){
     for(int i=0;i<ht_used_cnt;++i){int hi=ht_key[ht_used[i]];seen_bits[hi>>3]&=~(1<<(hi&7));}
     memset(out_load,0,g_l*sizeof(out_load[0]));
     memset(in_load,0,g_l*sizeof(in_load[0]));
+
     for(int i=0;i<fl_count;++i){
         fl_sl[i]=fl_src[i]/g_pr;
         fl_dl[i]=fl_dst[i]/g_pr;
     }
-    // Greedy (same as v33)
+
+    // Pass 1: greedy (same as v18)
     for(int i=0;i<fl_count;++i){
         int sl=fl_sl[i],dl=fl_dl[i];
         if(sl==dl){fl_port[i]=-1;continue;}
@@ -80,41 +103,51 @@ void solve_job(int job_idx){
         unsigned int m2=mask;
         while(m2){int ph=__builtin_ctz(m2);out_load[sl][bp][ph]++;in_load[dl][bp][ph]++;m2&=m2-1;}
     }
-    // Analyze global state after greedy
-    int G_max=0, worst_leaf=-1, worst_port=-1;
-    int second_max=0;
-    int at_max_count=0;
-    for(int leaf=0;leaf<g_l;++leaf)
-        for(int pk=0;pk<g_p;++pk){
-            int mo=0,mi=0;
-            for(int ph=0;ph<m;++ph){
-                if(out_load[leaf][pk][ph]>mo)mo=out_load[leaf][pk][ph];
-                if(in_load[leaf][pk][ph]>mi)mi=in_load[leaf][pk][ph];
+
+    // Pass 2: bottleneck-targeted swap
+    for(int iter=0;iter<20;++iter){
+        int mx=get_job_max(m);
+        if(mx<=1) break;
+        int improved=0;
+        for(int i=0;i<fl_count&&!improved;++i){
+            int sl=fl_sl[i],dl=fl_dl[i];
+            if(sl==dl) continue;
+            int cp=fl_port[i];
+            unsigned int mask=fl_pmask[i];
+            int on_bottleneck=0;
+            unsigned int m2=mask;
+            while(m2){
+                int ph=__builtin_ctz(m2);
+                if(out_load[sl][cp][ph]==mx||in_load[dl][cp][ph]==mx){on_bottleneck=1;break;}
+                m2&=m2-1;
             }
-            int fo=global_out[leaf][pk]+mo;
-            int fi=global_in[leaf][pk]+mi;
-            int fv=fo>fi?fo:fi;
-            if(fv>G_max){second_max=G_max;G_max=fv;worst_leaf=leaf;worst_port=pk;at_max_count=1;}
-            else if(fv==G_max){at_max_count++;}
-            else if(fv>second_max){second_max=fv;}
+            if(!on_bottleneck) continue;
+            // try moving to another port
+            int best_new=-1,best_new_max=mx;
+            for(int pk=0;pk<g_p;++pk){
+                if(pk==cp) continue;
+                int new_max=0;
+                m2=mask;
+                while(m2){
+                    int ph=__builtin_ctz(m2);
+                    int no=out_load[sl][pk][ph]+1;if(no>new_max)new_max=no;
+                    int ni=in_load[dl][pk][ph]+1;if(ni>new_max)new_max=ni;
+                    int oo=out_load[sl][cp][ph]-1;if(oo>new_max)new_max=oo;
+                    int oi=in_load[dl][cp][ph]-1;if(oi>new_max)new_max=oi;
+                    m2&=m2-1;
+                }
+                if(new_max<best_new_max){best_new_max=new_max;best_new=pk;}
+            }
+            if(best_new>=0){
+                m2=mask;
+                while(m2){int ph=__builtin_ctz(m2);out_load[sl][cp][ph]--;in_load[dl][cp][ph]--;out_load[sl][best_new][ph]++;in_load[dl][best_new][ph]++;m2&=m2-1;}
+                fl_port[i]=(short)best_new;
+                improved=1;
+            }
         }
-    // Count flows on worst port
-    int flows_on_worst=0;
-    for(int i=0;i<fl_count;++i){
-        if(fl_port[i]<0) continue;
-        if((fl_sl[i]==worst_leaf||fl_dl[i]==worst_leaf)&&fl_port[i]==worst_port)
-            flows_on_worst++;
+        if(!improved) break;
     }
-    int job_max=0;
-    for(int leaf=0;leaf<g_l;++leaf)
-        for(int pk=0;pk<g_p;++pk)
-            for(int ph=0;ph<m;++ph){
-                int o=out_load[leaf][pk][ph];if(o>job_max)job_max=o;
-                int iv=in_load[leaf][pk][ph];if(iv>job_max)job_max=iv;
-            }
-    if(job_idx>=15)
-        fprintf(stderr,"Job%d: G_max=%d 2nd=%d at_max=%d worst=(%d,%d) flows_on_worst=%d job_max=%d fl_count=%d\n",
-            job_idx,G_max,second_max,at_max_count,worst_leaf,worst_port,flows_on_worst,job_max,fl_count);
+
     // update global
     for(int leaf=0;leaf<g_l;++leaf)
         for(int pk=0;pk<g_p;++pk){
@@ -122,15 +155,16 @@ void solve_job(int job_idx){
             for(int ph=0;ph<m;++ph){if(out_load[leaf][pk][ph]>mo)mo=out_load[leaf][pk][ph];if(in_load[leaf][pk][ph]>mi)mi=in_load[leaf][pk][ph];}
             global_out[leaf][pk]+=mo;global_in[leaf][pk]+=mi;
         }
-    // Output (dummy)
-    printf("%d\n",fl_count);
-    for(int i=0;i<fl_count;++i){printf("%d %d %d",fl_src[i],fl_dst[i],fl_port[i]);if(i!=fl_count-1)printf(" ");}
-    printf("\n");fflush(stdout);
+
+    fast_write(fl_count);write_char('\n');flush_out();fflush(stdout);
+    for(int i=0;i<fl_count;++i){fast_write(fl_src[i]);write_char(' ');fast_write(fl_dst[i]);write_char(' ');fast_write(fl_port[i]);if(i!=fl_count-1)write_char(' ');}
+    write_char('\n');flush_out();fflush(stdout);
 }
+
 int main(){
     memset(ht_key,-1,sizeof(ht_key));
     int n=fast_read_int();
     g_l=fast_read_int();g_p=fast_read_int();g_r=fast_read_int();g_pr=g_p*g_r;
-    for(int i=0;i<n;++i)solve_job(i);
+    for(int i=0;i<n;++i)solve_job();
     return 0;
 }

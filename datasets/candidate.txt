@@ -1,0 +1,19 @@
+# Candidate set (observation layer, participates in submit decisions).
+# Purpose: verify online correlation, accumulate promotion data.
+#
+# 2026-05-31 v2: restructured based on v232->v369->v430->v436 calibration
+# - Promoted 6 cases with reliability +2/+3 to submit_core
+# - Moved 4 anti-correlated cases (v436 beneficiaries) to contrast
+# - Kept 8 cases with weak positive signal (reliability +1)
+#
+# Promotion rule: positive correlation verified (candidate up + online up)
+# Demotion rule: negative correlation (candidate up + online down)
+
+testcases/testcase_online_3.txt
+testcases/testcase_online_4.txt
+testcases/testcase_online_8.txt
+testcases/testcase_online_10.txt
+testcases/testcase_online_11.txt
+testcases/testcase_online_12.txt
+testcases/testcase_online_15.txt
+testcases/testcase_online_18.txt

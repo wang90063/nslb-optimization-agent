@@ -1,11 +1,18 @@
 # Contrast set.
-# Principle:
-# - Keep unresolved split cases that are useful for diagnosis.
-# - These cases can separate local branches, but are not yet trusted enough
-#   to decide submit/no-submit by themselves.
-# - 2026-05-21 refresh: add `medium_29/30` to diagnose why the
-#   `v138/v163` PC line helps medium-style cases online but is still
-#   underrepresented by the older local split set.
+# Purpose:
+# - explain *why* a branch moved
+# - keep broad unresolved splitters that are useful for diagnosis
+# - do not let these cases decide submit / no-submit by themselves
+#
+# 2026-05-25 v3 refactor:
+# - keep `proxy_11/12 + medium_29/30` as broad proxy-like diagnostics
+# - keep the low-r splitters here, but interpret them as diagnostic-only
+# - move narrow `param_hot` judgment to `transfer_holdout`, not here
+#
+# 2026-05-31 v4: add 4 anti-correlated candidate cases
+# - online_1/5/9/17: v436 showed large local gains (+0.13~+0.53) but online regressed
+# - These cases respond to "global state propagation" changes that don't transfer online
+# - Reliability score 0 or -1 across v232->v369->v430->v436 calibration
 
 testcases/testcase_bench_1.txt
 testcases/testcase_bench_16.txt
@@ -14,3 +21,9 @@ testcases/testcase_proxy_12.txt
 testcases/testcase_medium_29.txt
 testcases/testcase_medium_30.txt
 testcases/testcase_medium_31.txt
+testcases/testcase_param_r2_p32_hot.txt
+testcases/testcase_param_extreme_r2.txt
+testcases/testcase_online_1.txt
+testcases/testcase_online_5.txt
+testcases/testcase_online_9.txt
+testcases/testcase_online_17.txt

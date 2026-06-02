@@ -53,7 +53,8 @@ def main() -> int:
         print(f"  {path}")
     print()
 
-    cmd = ["python3", "scorer.py", solver, *files]
+    scorer = os.path.join(os.path.dirname(os.path.abspath(__file__)), "scorer.py")
+    cmd = ["python3", scorer, solver, *files]
     completed = subprocess.run(cmd)
     return completed.returncode
 

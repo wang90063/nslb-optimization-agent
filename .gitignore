@@ -1,24 +1,22 @@
-# Compiled binaries
-solver*
+# Build output (all compiled binaries go here)
+build/
+
+# Stray compiled binaries (legacy: compiled in repo root)
 main
 main_*
-v18
-v22
-v33
-v33_baseline
-v43_ensemble
-v44
-v44_ensemble6
-v45_*
-v46
-v46_restart
-cmp_v56
-cmp_v62
-dbg_jobmax
-debug2
-debug_global
-debug_v80
-tmp_v*
+solver
+solver*
+bin_*
+cmp_*
+eval_*
+hist_*
+porthash_*
+gate_audit_*
+diag_*
+dbg_*
+debug*
+tmp_*
+v[0-9]*
 
 # System
 .DS_Store

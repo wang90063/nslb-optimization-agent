@@ -1,0 +1,32 @@
+# Transfer-holdout set.
+# Purpose:
+# - diagnose near-neighbor branches around `v232` where the main backbone score
+#   no longer has enough resolution by itself
+# - keep only the families that are best read as "low-transfer concentration"
+#   rather than as secondary positive anchors
+#
+# 2026-05-25 v3 refactor:
+# - do not merge with `submit_anchor`
+# - remove the `medium_25/32 + p32` family from here, because that family now
+#   lives in `submit_anchor` as a secondary corroboration layer
+# - keep only `lowr_contrast + param_hot + lowr_*` here
+#
+# Read rule:
+# - do not use this manifest as a standalone ranker
+# - use it when versions are close on `submit_core`
+# - if a branch wins mostly here while `submit_core` / broad proxy-like layers
+#   stay flat, treat it as low-confidence for submission
+
+# Historically low-transfer core
+testcases/testcase_medium_31.txt
+testcases/testcase_param_r2_p32_hot.txt
+testcases/testcase_param_extreme_r2.txt
+testcases/testcase_param_r3_hot.txt
+testcases/testcase_param_n40_hot.txt
+
+# Same-family low-r extensions
+testcases/testcase_lowr_1.txt
+testcases/testcase_lowr_4.txt
+testcases/testcase_lowr_7.txt
+testcases/testcase_lowr_8.txt
+testcases/testcase_lowr_10.txt

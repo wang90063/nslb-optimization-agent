@@ -1,0 +1,14 @@
+# Submit anchor set.
+# Purpose:
+# - secondary corroboration layer for families that still matter locally
+#   but are no longer trusted to own the main submit ranking by themselves
+# - use together with `submit_core` / `submit_backbone`, not as a standalone ranker
+#
+# 2026-05-25 v3 refactor:
+# - keep the historically mixed-transfer `medium_25/32 + p32` family here
+# - remove `param_hot` from the main ranking path; it now lives in `transfer_holdout`
+
+testcases/testcase_medium_25.txt
+testcases/testcase_medium_32.txt
+testcases/testcase_param_p32_hot.txt
+testcases/testcase_param_p32_r4_n40.txt

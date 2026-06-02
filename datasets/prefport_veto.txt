@@ -1,0 +1,25 @@
+# Prefport veto diagnostic set.
+# Purpose:
+# - catch versions that only improve by over-biasing SA proposals toward
+#   adjacent-phase already-used ports
+# - preserve the broader SA gain from v232 over pre-SA baselines
+#
+# 2026-05-24 / 2026-05-25 calibration:
+# - `prefport_veto_1..4` are the original wide-pref-mask seeds
+# - `prefport_veto_5..10` are the new single-pref-collapse seeds
+# - combined target: rank `v232` above `v236 / v250 / v251`
+# - the earlier hand-picked `prefport_3/5/6` subset was directionally useful,
+#   but not stable enough as a standalone veto
+#
+# This set is diagnostic/veto-only. Do not use it as the sole submit ranking.
+
+testcases/testcase_prefport_veto_1.txt
+testcases/testcase_prefport_veto_2.txt
+testcases/testcase_prefport_veto_3.txt
+testcases/testcase_prefport_veto_4.txt
+testcases/testcase_prefport_veto_5.txt
+testcases/testcase_prefport_veto_6.txt
+testcases/testcase_prefport_veto_7.txt
+testcases/testcase_prefport_veto_8.txt
+testcases/testcase_prefport_veto_9.txt
+testcases/testcase_prefport_veto_10.txt

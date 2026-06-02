@@ -1,10 +1,9 @@
 # Low-r diagnostic set.
-# Principle:
-# - Temporary side manifest for `r<=3` search / repair research.
-# - New low-r cases land here first, before any promotion into
-#   `contrast` or `submit_core`.
-# - Focus on `jm==r+1`, `total≈p*r`, `p>=16 & multi-phase`, and
-#   hard-feasible `r=2` structures.
+# Purpose:
+# - temporary side manifest for `r<=3` search / repair research
+# - broader than `transfer_holdout` on purpose
+# - new low-r cases land here first, before any promotion into
+#   `contrast`, `submit_anchor`, or `transfer_holdout`
 
 testcases/testcase_param_extreme_r2.txt
 testcases/testcase_param_r2_p32_hot.txt

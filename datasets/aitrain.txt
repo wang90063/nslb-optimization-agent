@@ -1,0 +1,12 @@
+# AI Training scenario dataset
+# 特征：少流、高 phase、强同步、周期性 job 结构
+# 当前主要作为 `candidate.txt` 的母集
+
+testcases/testcase_aitrain_1.txt
+testcases/testcase_aitrain_2.txt
+testcases/testcase_aitrain_3.txt
+testcases/testcase_aitrain_4.txt
+testcases/testcase_aitrain_5.txt
+testcases/testcase_aitrain_6.txt
+testcases/testcase_aitrain_7.txt
+testcases/testcase_aitrain_8.txt

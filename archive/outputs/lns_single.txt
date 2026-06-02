@@ -1,0 +1,4 @@
+LNS-BEAM: pci_cnt=137 top_ci=10
+LNS-BEAM: pci_cnt=94 top_ci=17
+LNS-BEAM: pci_cnt=112 top_ci=5
+LNS-BEAM: pci_cnt=131 top_ci=6
