@@ -7,9 +7,17 @@
 
 ## sync
 
-last-synced-version: v454
+last-synced-version: v473
 
 ---
+
+## [2026-06-03] ingest | v473 run_swap MM-safe rollback 放宽 → [[run-swap-rollback-relax]] 封死
+
+run_swap 内层只接受降 max 的 move,故 MM 持平(`post_max==pre_max`)且 CB 可改善的窗口在主集上极少触发;即便加了「MM 持平时 CB 改善则保留」的放宽,收益也被 portfolio 层 better_metrics 抹平,几乎是空操作。本地 submit_core 902.06→902.05(-0.01 噪声)、candidate 455.88→455.71(-0.17)、prefport_veto +0.15 非回归、无 >7.4s 超时。MM 护栏按设计生效(anchor/prefport_veto 未恶化),没踩 swap 族「MM 反噬」死因,但收益未兑现。
+
+## [2026-06-02] ingest | v472 global_price p32r4 ungate → [[job-aware-global-state]] 封死
+
+字面思路(记 peak 替 sum 做 future cost)经 scorer.py L151-163 验证为 **metric-incorrect**:MM/Cbttskc 口径 = Σ_jobs max-phase-load(sum-of-peaks),主线 [[actual-global-out]] 已使 global state 精确,记 peak 会低估 future cost。衍生 ungate 实验 v472(去掉 `fl_count<=7000` 门控让 online_13 走 lexico):submit_core 持平(+0.01)、candidate -0.14、contrast -0.21,且 online_13 串行 7.749s 越过 [[insight:runtime-7.4s-acceptable]]。结论:`fl_count<=7000` 是 load-bearing 门控(保 candidate + 防超时)。
 
 ## [2026-06-02] query | 分两阶段(先压每端口 max load 再降冲突)是否试过 → 命中 [[stage-mm-then-cb]] 封死(v443/v445/v455,balanced 放松仍累积恶化 MM)
 

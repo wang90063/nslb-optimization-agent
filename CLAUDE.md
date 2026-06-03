@@ -56,7 +56,11 @@ Score = max(20 - (12*Cinphsc + 5*Cbtphsc + 3*Cbttskc)/TotalFlows + 40/Maxsingler
 │   ├── testcase_hard_*.txt
 │   ├── testcase_ai_*.txt
 │   └── testcase_proxy_*.txt
-├── Solution_*.cpp         # 算法版本
+├── versions/              # 所有 solver 源文件
+│   ├── Solution.cpp           # 当前基线快照
+│   ├── Solution_*.cpp         # 活跃迭代版本
+│   ├── build/                 # 编译产物（gitignore）
+│   └── archive/               # 归档的历史版本
 └── archive/               # 归档的旧生成器和数据集
 ```
 
@@ -139,9 +143,9 @@ Score = max(20 - (12*Cinphsc + 5*Cbtphsc + 3*Cbttskc)/TotalFlows + 40/Maxsingler
 ## 迭代规则
 
 - **优化方向的设计与「连续失败换方向」规则见 `algorithm-iterate` 的 `references/direction.md`**。要点：设计方向须同时分析 submit_core + candidate(历史教训 v318 转化率 5%)；同一方向连续 5 次无正增量必须换结构性不同的方向，禁止伪方向切换(仅调参数/顺序/gate)。
-- **每次尝试必须新建版本文件**：实验只能在新的 `Solution_YYYYMMDD_vN_*.cpp` 上进行，禁止直接把未验证改动写进 `Solution.cpp`；`Solution.cpp` 只作为当前基线快照，只有当某个新版本确认胜出后才同步替换。
+- **每次尝试必须新建版本文件**：实验只能在新的 `versions/Solution_YYYYMMDD_vN_*.cpp` 上进行，禁止直接把未验证改动写进 `versions/Solution.cpp`；`versions/Solution.cpp` 只作为当前基线快照，只有当某个新版本确认胜出后才同步替换。
 - 只要有线上提交的结果了，先存 SCORES.md，并且保留提交版本，再开新版本迭代。
-- 只要某个版本已经线上提交并拿到结果，就把对应版本源文件（`Solution_*.cpp`，不是 `Solution.cpp`）复制一份到 `submit/` 归档，再继续后续迭代。
+- 只要某个版本已经线上提交并拿到结果，就把对应版本源文件（`versions/Solution_*.cpp`，不是 `versions/Solution.cpp`）复制一份到 `submit/` 归档，再继续后续迭代。
 - **思路判断沉淀在 wiki**：产新方向前先用 `wiki-maintain` 查重（避免重复已封死方向）；记录版本时必须填「思路」外键（SCORES 排行榜 + log 总览的思路列）并同步更新 `wiki/ideas/` 对应页。事实写 SCORES/logs，判断写 wiki，不重复。
 - 不引入 case-level gate 或基于本地特有现象的窄规则。改进应来自 move/proposal/acceptance 的局部判断质量，而非对线上分布的推断。
 - 是否过拟合由多层口径判断：`anchor` 只作为已知低转化家族的**反向诊断层**，`prefport_veto` 回归 = 硬否决。

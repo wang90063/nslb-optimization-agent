@@ -19,10 +19,8 @@
 
 ### 待试
 - [calibrate-candidate-set](ideas/calibrate-candidate-set.md) — 用线上结果反向校准 candidate 集(最高优先)
-- [job-aware-global-state](ideas/job-aware-global-state.md) — 记录 per-job peak 端口贡献用于 future cost(2D,中等前景)
 - [min-cost-flow-init](ideas/min-cost-flow-init.md) — LP/min-cost flow 初始分配(2A,工程难度高)
 - [allow-extra-pc-chain-gate](ideas/allow-extra-pc-chain-gate.md) — 大 case 保留 extra PC 但跳 perport_refine(待审计)
-- [run-swap-rollback-relax](ideas/run-swap-rollback-relax.md) — 放宽 run_swap/global_swap rollback(待审计)
 - [swap-iter-count](ideas/swap-iter-count.md) — swap 迭代次数 / LNS in post-PP(待审计)
 
 ### 封死

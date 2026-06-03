@@ -37,9 +37,9 @@ def infer_label(solver_path: Path) -> str:
 
 
 def infer_source_path(baseline_label: str) -> str | None:
-    candidates = sorted(ROOT.glob(f"Solution_*_{baseline_label}_*.cpp"))
+    candidates = sorted((ROOT / "versions").glob(f"Solution_*_{baseline_label}_*.cpp"))
     if len(candidates) == 1:
-        return candidates[0].name
+        return f"versions/{candidates[0].name}"
     return None
 
 
@@ -673,7 +673,7 @@ def build_document(
         if row["case"]["p"] == 32
     )
     source_name = infer_source_path(baseline_label)
-    build_source = source_name or "Solution.cpp"
+    build_source = source_name or "versions/Solution.cpp"
 
     lines = [
         "# 结构性下界参考表",
