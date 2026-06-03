@@ -26,8 +26,7 @@ __pycache__/
 *.zip
 
 # Historical solver versions (kept on disk, not tracked)
-versions/archive/*
-!versions/archive/.gitkeep
+versions/archive/
 
 # Local config (track skill definitions + shared settings; ignore machine-local + scratch)
 .claude/settings.local.json
