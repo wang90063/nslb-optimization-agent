@@ -1,4 +1,4 @@
-# NSLB 算法竞赛项目
+# NOA — NSLB Optimization Agent
 
 ## 项目概述
 
