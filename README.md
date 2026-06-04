@@ -250,20 +250,24 @@ w = n / (n + k)   , k ≈ 3
 
 ## 6. 成绩进展 (Score Progression)
 
-从最初的 round-robin 基线一路爬到接近第一名。下面是有代表性的里程碑版本（完整排行榜见 [SCORES.md](SCORES.md)）：
+从最初的 round-robin 基线一路爬到接近第一名。下面是有代表性的里程碑版本，标了每版属于哪个**家族**、主要在攻哪个**指标**（完整排行榜见 [SCORES.md](SCORES.md)）：
 
-| 版本 | 线上分 | 关键改动 |
-|------|--------|----------|
-| v1 | 276 | 基线 round-robin |
-| v8 | 347 | per-flow 独立分配 |
-| v43 | 359 | 3 策略 ensemble |
-| v62 | 366.25 | proxy 导向 tie-break + local-first 候选 |
-| v138 | 369.12 | score-aware 端口一致性 + 全局压力 tie-break |
-| v232 | 369.65 | SA 退火预算收紧 |
-| v292 | 369.73 | 三轮 focused SA + cross_dest 恢复 |
-| v369 | 369.86 | cross_dest top-3 混合打分 |
-| v430 | 369.89 | time_tight 阈值放宽 4.5s→7.0s |
-| **v454** | **370.15** | **actual global_out + CB-aware 贪心 portfolio** |
+| 版本 | 线上分 | 家族 | 主要提升 | 关键改动 |
+|------|--------|------|----------|----------|
+| v1 | 276 | — | 基线 | round-robin |
+| v8 | 347 | 初始解 | 整体结构 | per-flow 逐流独立选端口（+21） |
+| v43 | 359 | portfolio | 候选多样性 | 3 策略 ensemble |
+| v62 | 366.25 | 比较器 | MM / 瓶颈 | 词典序比较器 jm→fg→ci→future（优先压最大负载） |
+| v138 | 369.12 | PC | CB（相位间 Cbtphsc） | score-aware 端口一致性 + 全局压力 tie-break |
+| v232 | 369.65 | SA | CB（退火降冲突） | SA 退火预算收紧 |
+| v292 | 369.73 | SA | CB（高冲突卡聚焦） | 三轮 focused SA + cross_dest 恢复 |
+| v369 | 369.86 | cross_dest | CB（任务间 Cbttskc） | cross_dest top-3 混合打分 |
+| v430 | 369.89 | pipeline | 运行预算（解锁大 case 后段） | time_tight 阈值放宽 4.5s→7.0s |
+| **v454** | **370.15** | **global_state** | **MM（global_out 准确性）** | **actual global_out + CB-aware 贪心 portfolio** |
+
+> **MM** = 最大负载瓶颈（评分公式里的 `40/Maxsingler + 40/Maxmultir` 项）；**CB** = 冲突罚分（`Cinphsc/Cbtphsc/Cbttskc` 三类，权重 12/5/3）。这两个是评分公式仅有的两大杠杆。
+
+**看家族+指标能看出一条清晰的弧线：** 早期（v8–v62）靠结构性改动和压 MM 拿大头；一旦 MM 触到信息论下界、再压不动（见 wiki insight [`proxy-at-info-bound`](wiki/insights/proxy-at-info-bound.md)、[`mm-tight-bound-unreachable`](wiki/insights/mm-tight-bound-unreachable.md)），中后段（v138–v369）几乎全是在不同家族里换着法子降 **CB**——PC 降相位间冲突、SA 退火降冲突、cross_dest 降任务间冲突。最后 v454 又回到 MM，但走的是"把 global_out 的保守近似换成真值"这唯一一道还没堵死的缝，而不是硬压。
 
 **当前最佳：370.15（v454），最终排名27（三等奖）。**（注：这个分数是w/o wiki和ucb的NOA版本获得的）
 
