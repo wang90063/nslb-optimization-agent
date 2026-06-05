@@ -32,3 +32,6 @@ versions/archive/
 .claude/settings.local.json
 .claude/projects/
 .claude/skills/*-workspace/
+
+# Scratch docs (local notes, not tracked)
+docs/
