@@ -71,17 +71,22 @@ rg --files testcases
 - 读 `SCORES.md`：当前最优版本、历史、当前方向
 - 读 `BOUNDS.md`：各指标结构性下界，确认哪些还有空间、哪些已封死(诊断方法见 scoring.md)
 - 确认两个基线：**当前基线**(通常 `versions/Solution.cpp`)与**最佳线上基线**(见 acceptance.md)
+- **基线各层分数 = durable 快照**:从 `online_ledger.md` 最新线上行 + `BOUNDS.md` 基线标签读出(如 v454: submit_core 902.03 / candidate 455.54),**不靠每轮重跑得到**。这是事实层已记录的数,直接用
 - 扫 `testcases/` 全部家族(bench/medium/hard/ai，本地↔线上不一致时加 proxy)，不要只看单个文件
 
 ### 2. 瓶颈分析 + 方向(派 analysis subagent)
 
-编译当前基线并按主线口径串行评测(命令见 datasets.md)。solver 源文件都在 `versions/`,产物输出到 `versions/build/`：
+**基线分用 step 1 的 durable 快照,默认不重跑。** 候选 vs 基线的新鲜同场对比是 step 4 eval subagent 的活(它本就串行交替重编基线+候选,见 [agents/eval.md](references/agents/eval.md)),所以这里再独立重评一次基线纯属冗余——既烧 CPU、又把逐 case 长输出灌进主线 context,正是 orchestrator 模式要避免的。analysis 简报喂快照分即可。
+
+**唯一例外**:快照失真时才现跑基线一次。判据=`BOUNDS.md` 基线标签或 `online_ledger.md` 最新行的版本 ≠ 当前 `versions/Solution.cpp` 对应版本(基线刚被新版本替换、但 BOUNDS/台账还没刷新)。此时:
 
 ```bash
-g++ -O2 -o versions/build/main versions/Solution.cpp
+g++ -O2 -o versions/build/main versions/Solution.cpp   # 仅快照失真时
 ```
 
-拿到分数后**派 analysis subagent**(契约见 [agents/analysis.md](references/agents/analysis.md))一次性做完瓶颈定位 + hook 点 + 约束事实 + wiki 查重 + 风险预判。它读 solver/BOUNDS/scorer/wiki 这类大文件,读得多回得少,正适合隔离 context。主线只接结构化回包,不亲自啃完整个 solver。
+跑完顺手按 scoring.md 刷新 `BOUNDS.md`,让快照重新对齐,下轮又能直接复用。
+
+拿到基线分(快照或现跑)后**派 analysis subagent**(契约见 [agents/analysis.md](references/agents/analysis.md))一次性做完瓶颈定位 + hook 点 + 约束事实 + wiki 查重 + 风险预判。它读 solver/BOUNDS/scorer/wiki 这类大文件,读得多回得少,正适合隔离 context。主线只接结构化回包,不亲自啃完整个 solver。
 
 analysis 回包硬性含五样:瓶颈定位、改动 hook 点(函数+行号)、**约束事实**(任何与候选方向冲突的事实,理由见上)、wiki 查重结论(试过没/死没死)、风险预判。它必须**同时分析 submit_core 和 candidate**——core 反映已验证的线上相关性,candidate 反映对线上盲区的推断;只在 core 有效而 candidate 无变化的改动往往只对窄结构有效(历史教训 v318 转化率 5%)。
 
