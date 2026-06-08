@@ -10,7 +10,7 @@
 
 - 当前基线各层分数（来自 `online_ledger.md` 最新线上行 + `BOUNDS.md` 基线标签的 durable 快照，主线默认不重跑基线——见 SKILL.md 第 2 步；仅快照失真时主线才现跑一次）
 - 候选方向的 family / 一句话设想（若主线已有初步想法）
-- 当前 UCB 排序状态（各 family 的 visits/status，主线从 `wiki/index.md`+`wiki/ideas` 读出）
+- 当前方向选址富图（`idea_graph.py` 输出:各 family 的 n/活idea/cost、DAG 拓扑、死墙传染、dormant 分桶,主线从 `wiki/ideas` 聚合）
 
 ## 读写边界
 
@@ -44,6 +44,6 @@
 
 ## 主线接包后做什么（不外包）
 
-- **方向最终决策**：橡皮图章——主线读回包，按 UCB 排序 + 约束事实裁定是否采纳该方向、或跳到 UCB 更高的 family。
+- **方向最终决策**：橡皮图章——主线读回包,按 `idea_graph.py` 富图 + 探索/利用原则(见 `references/direction.md`)+ 约束事实裁定是否采纳该方向、或跳到更值得挖的 family。
 - 命中封死方向或约束事实推翻前提时，主线据此换方向，不让 subagent 替它决定。
 - 决策属 synthesis，一旦外包给隔离 context 极易事实漂移，故留主线。

@@ -31,6 +31,15 @@ idea 页里的 `online:`/`local:` 是**缓存投影**,真值在 SCORES;冲突时
 字段定义、状态机、边类型 → [references/schema.md](references/schema.md)
 回填历史的过程记录 → [references/sync.md](references/sync.md)
 
+## 方向选择的理由要落 log.md(无论谁拍板)
+
+`algorithm-iterate` 选下一个主战场时,有一个只读脚本产**记账富图**给判断用——但它只产事实,不算裁决分:
+- `idea_graph.py`:Selection 富图(各 family 的 n/活idea/cost、idea 演化 DAG、变体/取代/泛化边、status 染色、高入度死墙清单、死墙传染、dormant 候选分桶「仍开阔 vs 已被死路预言」)
+
+拍板由 **LLM 读富图 + 探索/利用原则**(原则见 `algorithm-iterate/references/direction.md`,不规定任何裁决公式):exploit 有活 idea 且未挖透的 family;explore 低 n 且未被死墙预言的 dormant;剪掉被死墙传染的候选;expensive 档押后。两种跑法(有人在环 / `/loop` 无人值守)都是 LLM 读同一张图判断,差的只是谁兜底。
+
+**不变量:无论谁拍板,选址理由必须追写进 `wiki/log.md`**(`## [date] select | 选了 X,因为…`)。这是「把判断交给 LLM」要付的可审计代价——掉分时能回溯当时为何这么选,不能省。`/loop` 无人值守时这条更硬(无人兜底,只能靠日志复现)。
+
 ## 三种工作方式(从用户的话里判断走哪条)
 
 - 用户在**构思/提出一个改进方向**,或问「X 试过没」「之前搞过没」「搜搜关于 Y 的思路」 → **查重**

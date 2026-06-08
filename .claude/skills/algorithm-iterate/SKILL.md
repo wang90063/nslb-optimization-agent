@@ -23,7 +23,7 @@ trigger: "用户要求优化算法、提分、迭代、尝试新方案"
 
 > **本 skill 必须在主 session 运行,不可塞进 subagent 跑。** 运行时不支持嵌套 subagent(subagent 手里没有 Agent 工具)——若本 skill 自身在某个 subagent 里执行,它就派不出 analysis/impl/eval/wiki-ingest,所有委派静默退化成 inline,context 优化全失效。`/loop` 正是在主 session 驱动它,符合此约束。
 
-主线**自己做、绝不外包**的事:橡皮图章方向(读 analysis 回包按 UCB+约束事实裁定)、eval 前 review diff、取舍判断(读 acceptance.md 走红绿灯)、verdict + 思路 slug + wiki 状态迁移的判断、第 7 步阶段自检。这些是 synthesis,一旦外包给隔离 context 的 subagent,极易与主线事实漂移、或丢掉「推翻方向的关键事实」。
+主线**自己做、绝不外包**的事:橡皮图章方向(读 analysis 回包 + `idea_graph.py` 富图按探索/利用原则裁定)、eval 前 review diff、取舍判断(读 acceptance.md 走红绿灯)、verdict + 思路 slug + wiki 状态迁移的判断、第 7 步阶段自检。这些是 synthesis,一旦外包给隔离 context 的 subagent,极易与主线事实漂移、或丢掉「推翻方向的关键事实」。
 
 四类可派的 subagent。**每类的输入/输出/读写边界/回包格式都固化在 `references/agents/<name>.md` 契约文件里,派之前先读对应契约**——这里只给一句话「何时派」:
 
@@ -94,8 +94,8 @@ analysis 回包硬性含五样:瓶颈定位、改动 hook 点(函数+行号)、*
 
 读 analysis 回包,主线自己拍板:
 
-- 按 UCB 排序(各 family visits/status,见 direction.md)+ 约束事实,裁定采纳该方向还是跳到 UCB 更高的 family。
-- 命中已封死方向(查重标红)或约束事实推翻前提 → 换方向,不让 subagent 替你决定。
+- 读 `idea_graph.py` 富图(各 family 的 n/活 idea/cost、DAG 拓扑、死墙传染、dormant 分桶),按 direction.md 的探索/利用原则裁定采纳该方向还是跳到更值得挖的 family。
+- 命中已封死方向(查重标红)、被死墙传染预言的 dormant、或约束事实推翻前提 → 换方向,不让 subagent 替你决定。
 - 这是 synthesis,一旦外包给隔离 context 极易事实漂移,故留主线。
 
 ### 3.5 实现新版本(派 impl subagent)
@@ -147,20 +147,20 @@ analysis 回包硬性含五样:瓶颈定位、改动 hook 点(函数+行号)、*
 | 信号 | 来源 | 触发线 | 到点动作 |
 |------|------|--------|----------|
 | 距上次校准的新提交数 | `online_ledger.md` sync 水位 | ≥3 | 建议跑 `calibrate-dataset` |
-| 方向 UCB 排序 | 各 family 的 visits/status(`wiki/ideas`+`index.md`)算 UCB(公式见 `references/direction.md`) | 当前 family 不再是 UCB 最高 | 跳到 UCB 最高的 family(n=0 必先试;主线但 n 小则深挖);全 family UCB 跌破地板→搜文献。「连续无增量 ≥5」为保底提醒 |
+| 方向选址 | `idea_graph.py` 富图(各 family n/活idea/cost、死墙传染、dormant 分桶,见 `references/direction.md`) | 当前 family 已挖透(无活 idea 在涨)或有更值得挖的开阔方向 | 按探索/利用原则换 family(开阔 dormant 优先;被死墙预言的剪掉);图内全枯竭→搜文献。「连续无增量 ≥5」为保底提醒 |
 | 区分度失效 | 最近几版评分:有无「多版同分」或「本地排序与线上反」 | 出现 | 建议跑 `generate-dataset` 造更尖的 case |
 
 输出格式(一行,放在本轮回复末尾):
 
 ```
-[阶段自检] <版本>已记 | 距校准 N/3 | 方向:当前<family>(UCB=x.x) vs 最高<family>(UCB=y.y) | 区分度<正常/失效> → <继续迭代 / 建议先 calibrate / 建议挖<family> / 建议搜文献+generate>
+[阶段自检] <版本>已记 | 距校准 N/3 | 方向:当前<family>(n=x,活idea) vs 建议<family>(读图理由) | 区分度<正常/失效> → <继续迭代 / 建议先 calibrate / 建议挖<family> / 建议搜文献+generate>
 ```
 
 例:
-- `[阶段自检] v455已记 | 距校准 1/3 | 方向:当前pipeline(UCB=1.4) vs 最高init(UCB=∞,n=0) | 区分度正常 → 建议挖 init(从未试过)`
-- `[阶段自检] v457已记 | 距校准 3/3 ✋ | 方向:当前global_state(UCB=4.6,主线n=2) vs 最高同上 | 区分度正常 → 建议先跑 calibrate-dataset,之后继续深挖 global_state`
+- `[阶段自检] v455已记 | 距校准 1/3 | 方向:当前pipeline(n=26,活idea仅1) vs 建议init(n=0开阔但expensive,押后)→实挑PC开阔dormant | 区分度正常 → 建议挖 PC(仍开阔)`
+- `[阶段自检] v457已记 | 距校准 3/3 ✋ | 方向:当前global_state(主线actual-global-out,n=3未挖透) | 区分度正常 → 建议先跑 calibrate-dataset,之后继续深挖 global_state`
 
-**手动单轮模式**:UCB 只**打印建议**,不自动驱动 idea 生成——挖哪个 family、要不要搜文献仍由你定。多个信号同时到点时全部报出,由用户决定先做哪个。没到点就照常 `→ 继续迭代`,不打断节奏。
+**手动单轮模式**:`idea_graph.py` 只**产事实供你读**,不自动驱动 idea 生成——挖哪个 family、要不要搜文献仍由你按探索/利用原则定。多个信号同时到点时全部报出,由用户决定先做哪个。没到点就照常 `→ 继续迭代`,不打断节奏。
 
 ### 8. loop 自治模式(仅当经 `/loop` 连续自转时启用)
 
@@ -172,7 +172,7 @@ analysis 回包硬性含五样:瓶颈定位、改动 hook 点(函数+行号)、*
 |------|----------|------|
 | 区分度失效(多版同分/本地与线上反) | 自动调 `generate-dataset` 造更尖的 case | **本地可判,会真触发**——这是 loop 从「902.0x 噪声」里自己爬出来的逃生阀 |
 | 距校准 ≥3/3 | 自动调 `calibrate-dataset` | 计数器只在**线上提交**后才动,而提交需人肉(见下),故 loop 内通常要你提交几次后才到点 |
-| 都没到点 | 按 UCB 最高 family 选方向,继续下一轮迭代 | n=0 必先试;主线但 n 小则深挖 |
+| 都没到点 | 读 `idea_graph.py` 富图,按探索/利用原则选 family,继续下一轮迭代 | 开阔 dormant 优先;主线但未挖透则深挖;被死墙预言的剪掉。**选址理由落 `wiki/log.md`**(无人值守可审计性要求) |
 
 > 卫星 skill(generate-dataset/calibrate-dataset)会改数据集文件(造新 case、重分层)。这是自治模式下被显式授权的动作——用户开 `/loop` 时已同意。但**线上提交、改 `Solution.cpp` 基线**不在授权内(见下停止边界)。
 
@@ -181,7 +181,7 @@ analysis 回包硬性含五样:瓶颈定位、改动 hook 点(函数+行号)、*
 loop 自转能自动做完「除线上提交外的一切」——造版本、eval subagent 串行评测、取舍判断、记录、按需调卫星。但碰到下面任一情况**必须停下、不再续下一轮**,输出一句话说明为何停、等你介入:
 
 - **命中可提交版本**:某版按 acceptance.md 红绿灯达到 `core 真涨` 或 `core 平 + candidate 涨`。线上分本地算不出(`online_ledger` 存在的理由),提交动作必须人肉做——loop 到此为止,把版本和证据摆给你。
-- (兜底)**所有 UCB arm 耗尽**:无 n=0 未探索 family、exploit 项全转负——已无本地可挖方向,需你给新方向或解锁文献搜索。
+- (兜底)**图内所有方向耗尽**:无 n=0 未探索 family、dormant 全被死墙传染剪掉、无活 idea 仍在涨——已无本地可挖方向,需你给新方向或解锁文献搜索。
 
 > 为什么停在「可提交」而非自动提交:线上评测机是唯一本地不可复算的真值源,且提交对外可见、不可逆。这正是 safety 上「影响外部/不可逆动作需人确认」的边界,自治 loop 不跨。
 

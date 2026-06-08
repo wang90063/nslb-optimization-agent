@@ -11,68 +11,57 @@
 
 ## 连续失败换方向规则
 
-方向选择本质是 exploit/explore 权衡:深挖当前方向,还是跳到没探索的方向。把它形式化成各 operator family 的 UCB 排序,比拍脑袋数"是不是满 5 次"更准。
+方向选择本质是 exploit/explore 权衡:深挖当前方向,还是跳到没探索的方向。
 
-### 方向选择 = 各 family 的 UCB 排序
+**记账归脚本,判断归 LLM。** 一个「选方向」决策捆了两个能力要求相反的子任务:
+- **探索记账**(各 family 的访问数 n / 死墙集合 + 入度 / dormant 待试 / idea 演化拓扑 / 死墙传染)——客观、烦、LLM 易错 → 交确定性脚本 `idea_graph.py`,它产一张**富图**(记账事实 + DAG 拓扑),不算裁决分。
+- **价值判断**(这条 +0.5 是不是早期弱基线的?某 dormant 真「没试过」还是已被相邻死路预言?该深挖还是该跳?)——需要看穿均值、顺结构推理 → 交 LLM。
 
-换方向前(或每轮收尾)给每个 family 算:
+**为什么不再用 UCB 标量裁判**(历史:曾用 `UCB=V+C·√(lnN/n)` 排序选址):
+- idea 级样本饿死。`N≈130 / 10 family`,细到 idea 级每节点仅 2-3 版本,`√(lnN/n)` 探索项在节点级退化成近似常数(≈1.3~1.6 窄带)→ 所有未试节点并列顶格 → 跟随机选无异。探索项只在 n **差异巨大**时(greedy n=51 vs init n=0)才有区分力,节点级没有。
+- 真正承重的是 **insight 墙图(side information)**:一堵高入度墙横跨多 family,一个 family 撞死等于预言所有共享该墙的 family。UCB1 假设 arm 独立、把这个扔掉,只能靠手写 prior 硬打补丁——常数(C / k / 墙 ±1.0 / 入度阈值)全靠拍、没标定。基类选错了:问题主轴是「带结构先验的非平稳决策」,不是 iid bandit。
+- 均值会埋掉好机制:把一个 family 的活 idea 回报求均值,会让一条 +0.42 的主线被同族一堆死机制的 −1 拉平。LLM 看原始分布能看出来,公式不能。
 
-```
-UCB(family) = V(family) + C·√(ln N / n)
-  N = 总尝试版本数, n = 该 family 已试版本数, C≈1(explore/exploit 旋钮)
-```
+所以**不再有裁决标量**。`idea_graph.py` 只把客观事实铺到图上,LLM 按下面的探索/利用原则读图拍板。
 
-公式只两项(都和线上分同单位、可比可算);**工程成本不进求和,改作门控**(见 ③),避免「1 单位工程量 = 多少线上分」这种没法非任意标定的换算。两项各管一件事(下面每项都标了「漏了会怎样」,均由 SCORES 真值回测得出):
+### 读 `idea_graph.py` 富图按探索/利用原则选方向
 
-**① V(family) = 这个方向值不值——insight 先验 + 线上真值的加权**
+每轮收尾(或方向枯竭时)跑 `idea_graph.py`,它给出每个 family 的:访问数 n、活 idea 数、cost 档、DAG 演化拓扑(变体/取代/泛化边 + status 染色)、跨 family 横向边、高入度死墙清单、**dormant 候选分桶(仍开阔 vs 已被死路预言)**。读图时按这套原则判断:
 
-```
-V = (1−w)·prior_insight + w·observed     w = n/(n+k), k≈3
-```
+**① exploit——深挖有活 idea 且未挖透的 family**
+- family 有**主线/部分有效**的活 idea 且 n 还小(如 global_state:主线 actual-global-out、n≈3、cost=cheap)→ 收益真、便宜、没挖透 → **该深挖,不是该换**。
+- 别被均值骗:一个 family 即使整体回报均值低,只要**单条**活 idea 的原始回报序列亮眼(图上看 status=主线 的节点),就值得顺它的变体边继续挖。
 
-- `observed` = **该 family 活 idea 的实测回报均值**（活 = status∈{主线,部分有效}）。已封死 idea 不计入——历史失败由 prior_insight(撞墙)负责,重复计入会双重惩罚。每条活 idea 的回报按三层 fallback 取值:
+**② explore——跳去低 n 且没被死墙预言的方向**
+- dormant 分桶里「**仍开阔**」的待试 idea(未撞高入度死墙)→ 真正没探索过、值得试,按 cost 从便宜到贵挑。
+- n=0 的开阔 family 同理:从没看过 → 优先,**除非**它撞了高入度死墙(见③剪枝)。
 
-  1. **有线上Δ**(从 `online_ledger.md` 按 slug 匹配) → **直接用线上Δ**（最可信,真目标）
-  2. **无线上Δ但有线下Δ**(从 idea frontmatter `local_delta:` 字段读) → **线下Δ × 转化率**
-     - 转化率来源:该 family 内既有线上Δ又有线下Δ的 idea,取 `mean(线上Δ) / mean(线下Δ)`;无样本则用全局默认 `0.3`(v318 教训:转化率中位数约 30%,最差 5%)
-     - 这是临时值——下次线上结果落地后回溯修正为层 1
-  3. **线上/线下Δ都没有** → **status 离散映射** `主线=3 / 部分有效=1 / 验证中=0 / 待试=0 / 封死=−1`
+**③ 剪枝——死墙传染预言的方向不算「没试过」**(这是替代 UCB prior 的因果信号)
+- dormant 分桶里「**已被相邻死路预言**」的待试 idea(自己撞高入度死墙,或顺变体/泛化边邻接一个撞死墙的封死节点)→ 它的「没试过」是假的,命运已被相邻 arm 预言 → **剪掉,别当新方向去试**。例:`min-cost-flow-init` 撞 `portfolio-diversity-matters`、`swap-iter-count` 撞 `sa-search-exhausted`。
+- 高入度死墙(入度≥5 且无活 idea)= 跨多 family 的硬约束。任何方向若与已封死方向共享这种墙,大概率同样封顶——这是因果推理(撞墙剪枝),比稀疏样本的均值估计可靠。
 
-  最终 `observed = mean(各活 idea 的回报值)`。若该 family 无活 idea(全封死),则 `observed = best_status`(取最好 status 的映射值,即 fallback 到 −1)。
+**④ cost 门控——有便宜活路时别先碰贵的**
+- cost 档(`cheap`=调参/改现有 operator,`medium`=加新 operator,`expensive`=全新组件/换框架/外部 solver 如 init 的 MCF)。
+- 规则:**expensive 档仅当所有 cheap/medium 档都试穿后才考虑**(和「文献搜索」是同一条「贵 arm 押后」梯子,只是轻一档)。不把工程量换算成线上分(没法非任意标定),只用「有便宜主线可挖时别去碰 LP solver」这个唯一有用的成本信号。
 
-  **`local_delta` 字段规范**(idea frontmatter):
-  - 格式:`local_delta: [+0.52, +0.31]`(数值列表,对应 versions 里各版本 vs 当时基线的 submit_core 分差)
-  - 来源:每次版本评测时从 scorer 输出记入(新建 idea 时填;已有 idea 迁移时回填)
-  - 不可解析时(自由文本或空):该 idea 跳到第 3 层 fallback
+"连续 5 次无增量"退化为**保底提醒**,不再是唯一开关——③的死墙剪枝 + ①的 exploit 收益判断会在更早就把动力转向 explore。
 
-  **这是 v318 转化率 5% 教训的硬编码**:线下涨不等于线上涨,不打折就会把窄结构改动当成真收益。
-- `prior_insight` = **未探索 family 的 bootstrapping**(n 小才靠它):与已封死 family 共享高入度墙→压低;近 `remaining-space-cb-p32r4`/`proxy-at-info-bound`→抬高;被 `portfolio-diversity-matters` 点名(如 init)→打折。
-- `w = n/(n+k)` 收缩:n 小信先验、n 大信实测,避免「自己封死(observed低)+共享墙(prior低)」被双重惩罚。
-- **漏了 V 会怎样**:回报只看「已试版本的最优状态」时,n=0 的 family 无脑顶格,把人往没数据的方向推。
+### 双模式拍板:谁读完富图做决定
 
-**② C·√(ln N / n) = 这个方向看够没——探索项**(UCB1 原味,n 越小动力越大)
+`idea_graph.py` 只产事实,拍板权随两种跑法切换——但**两种模式都是 LLM 读富图按上面的探索/利用原则判断**,差的只是谁兜底、可审计性要求:
 
-**③ 工程成本 = 门控,不是连续项**
+- **有人在环(日常 `algorithm-iterate` 主循环)→ LLM 拍板,有人兜底**
+  默认模式。LLM 读富图(记账事实 + DAG 拓扑 + dormant 分桶 + 死墙传染),按①~④原则选 family。判断质量最高——能看穿「+0.5 是早期弱基线虚高」「主线被同族死机制均值埋掉」这类事实表里看不出的东西。
+- **全自主 `/loop`(无人值守)→ LLM 拍板,无人兜底**
+  没人盯时仍是 LLM 读同一张富图、按同一套原则选。代价是判断可能漂、当时为啥这么选难复现——所以**可审计性要求更高**:必须把读到的关键事实(选了哪个 family、它的 n/cost、剪掉了哪些被预言的 dormant、为什么)完整落 `wiki/log.md`,掉分时能回溯。
 
-- 每个 family 标一个**粗档**(不估工程量,直接复用下文「禁止伪切换 vs 结构性方向」的分类):
-  - `cheap` = 伪切换级(调参/换序/换 gate)、改现有 operator
-  - `medium` = 在现有框架内加一个新 operator
-  - `expensive` = 全新算法组件 / 换框架 / 外部 solver(如 init 的 MCF)
-- 规则:**expensive 档 family 仅当所有 cheap/medium 档都试穿后才参与排序**(和「文献搜索」是同一条「贵 arm 押后」梯子,只是轻一档)。
-- **为什么用门控不用 `−λ·cost`**:连续项要把工程量换算成线上分(λ 标定纯靠拍),且要预估「下一轮写多少代码」(出名地不准)。门控只需一个你执行 step 3 时**本来就在做**的三选一分类,零额外估算,却保住了成本信号唯一有用的场景——「有便宜主线可挖时别去碰 LP solver」。
-- **漏了成本信号会怎样**:回测中纯 UCB1 在每个决策点都先喊 init(n=0→探索项最大),但 init 真值是「从未实现、半族封死、被 portfolio 预警收益会被 PP 抹平」。靠 ① 的 prior 打折压「大概率没用」+ ③ 的门控押后「贵」,才能让真正产出 +0.42 的 global_state 浮上来(SCORES v436→v454 真实路径)。
+为什么不给 `/loop` 配一个「UCB top-1 当确定性兜底」:那等于在两模式跑不同 meta 策略,违反下面不变量③;且 UCB 标量本身已因样本饿死失去区分力(见上「为什么不再用 UCB 裁判」),拿一个没区分力的公式当兜底是假确定性。无人值守的纪律靠③的死墙剪枝(确定性、可复现)保证,不靠 bandit 公式。
 
-选 UCB 最大的 family 作为下一个主战场。三种典型读数:
+**不变量**(两模式都守):①记账永远归确定性脚本(`idea_graph.py`),判断永远归 LLM;②选址理由必须落 `wiki/log.md`(换来「判断」要付的可审计代价,不能省);③别让 LLM 每轮换 meta 策略(这次读图判断、下次 UCB、再下次 Thompson),否则掉分时分不清是 solver 退化还是 meta 策略变了。
 
-- **n=0 且无负先验的 family** → 探索项大 → **优先试**(从没看过);但若被 insight 先验压低(init)→ 不再顶格,押后
-- **主线 family 但 n 还小**(如 global_state 回报=3、n≈2、rollout 便宜)→ V 高+成本低 → **该深挖,不是该换**
-- **试了很多次全封死**(如 greedy n≈51、回报=−1)→ V 低+探索项也小 → **不再投入**(撞墙数为 0 不代表开阔,可能只是被锤烂了没人再记墙)
+### side information:为什么死墙图比 arm 独立性假设更承重
 
-visits(n)和 status 从 `wiki/ideas` 的 versions/status 读,family 分组见 `wiki/index.md`。"连续 5 次无增量"退化为**保底提醒**,不再是唯一开关——UCB 会在 exploit 收益耗尽前就把动力转向 explore。
-
-### 为什么需要 ① 里的 prior_insight:UCB1 假设 arm 独立,这里不成立
-
-UCB1 假设各 arm 独立,但 `global-state-propagation` 这类 insight 墙横跨 5 个 family——一个 family 撞死在某墙上,等于预言了所有共享该墙的 family。所以**不能**让一个「看似没试过」的 family 仅凭 n 小就拿高分:它若与已封死 family 共享高入度墙,它的"没试过"是假的(命运已被相邻 arm 预言)。这正是 ① 里 `prior_insight` 存在的理由——把这种跨 arm 的预言压进 V(而不是动 ② 的探索项),再由 `w=n/(n+k)` 控制「n 小时先验说了算、n 大后让位实测」。墙的入度 = 被多少 idea 引用(查 `wiki/insights` 被引数),引用越多 = 越硬的全局约束、prior 压得越狠。
+经典 bandit(UCB1)假设各 arm 独立,但 `global-state-propagation`、`cb-mm-tradeoff` 这类 insight 墙横跨多个 family——一个 family 撞死在某墙上,等于预言了所有共享该墙的 family。所以**不能**让一个「看似没试过」的 family/dormant 仅凭 n 小就当开阔方向:它若与已封死方向共享高入度墙,它的"没试过"是假的(命运已被相邻 arm 预言)。这正是 `idea_graph.py` 的**死墙传染**(③剪枝)要捕捉的——把跨 arm 的预言显式标到图上,而不是塞进一个手写 prior 常数里。墙的入度 = 被多少 idea 引用(`idea_graph.py` 自动算),引用越多 = 越硬的全局约束、越该剪。
 
 ### "同一方向"的判定(= arm 的定义;从严，以下全部算同一方向，计数器不重置)
 
@@ -102,20 +91,20 @@ UCB1 假设各 arm 独立,但 `global-state-propagation` 这类 insight 墙横�
 
 ### Selection → Expansion:选完 family 后怎么定具体机制
 
-UCB 排序只决定「在哪个 family 挖」,不决定「挖什么具体机制」。Selection 到 family 粒度为止,往下分到 mechanism 级时统计样本太稀(平均 n≈2-3、UCB 探索项主导、跟随机选差不多),所以 mechanism 级靠**因果推理**(撞墙剪枝),不靠统计(reward 均值)。
+读图选 family 只决定「在哪个 family 挖」,不决定「挖什么具体机制」。Selection 到 family 粒度为止,往下分到 mechanism 级时统计样本太稀(平均 n≈2-3、任何探索分都退化成近似常数、跟随机选差不多),所以 mechanism 级靠**因果推理**(撞墙剪枝),不靠统计(reward 均值)。
 
-衔接 fork 对应 `ucb_frontier.py` 输出的两种情形:
+衔接 fork 对应读 `idea_graph.py` 富图后的两种情形:
 
 ```
-ucb_frontier.py → 推荐 family X
+idea_graph.py 富图 + 探索/利用原则 → LLM 选定 family X
                     │
-       该 family 有 dormant idea?(status=待试)
+       该 family 有 dormant idea?(status=待试,看「仍开阔」分桶)
                     │
             有 ──→ 复活该 idea(直接进入 step 3 实现)
             无 ──→ Expansion 三步(下) → step 3 实现
 ```
 
-**有 dormant idea 时:直接复活**。`ucb_frontier.py` 已打印「可复活的待试 idea」列表;这些 idea 此前已设计、记入 `wiki/ideas/`,但还没写过代码——直接挑一个进入 step 3,不再发明新机制、不再查重。
+**有 dormant idea 时:直接复活**。`idea_graph.py` 的 dormant 分桶已列出「仍开阔(未被死路预言)」的待试 idea;这些此前已设计、记入 `wiki/ideas/`,但还没写过代码——从「仍开阔」堆里挑一个进入 step 3,不再发明新机制、不再查重(「已被预言」堆的不碰)。
 
 **无 dormant idea 时:Expansion 三步**
 
@@ -125,18 +114,18 @@ ucb_frontier.py → 推荐 family X
 
 **为什么 mechanism 级不做统计选择**
 
-- 样本稀疏:N≈186 / 10 family / 平均每 family 18 版本,再细分到 mechanism 子档每档只剩 2-3 版本,UCB 探索项 √(ln N / n) 主导,所有未试机制并列顶格——和随机选无异
+- 样本稀疏:N≈130 / 10 family,再细分到 mechanism 子档每档只剩 2-3 版本,任何探索分 √(ln N / n) 都主导,所有未试机制并列顶格——和随机选无异(这正是 family 级也已抛弃 UCB 标量的同一个原因)
 - 因果信号更强:mechanism 是否撞已知墙(如 `cb-mm-tradeoff` / `global-state-propagation`)是确定性判断,比稀疏样本的均值估计可靠
 - 树会随认知漂移:每条新 insight 入 wiki,多个 mechanism 子档的"是否撞墙"都可能同时翻转——所以 mechanism 级**不持久化为树节点**,只在每轮 Expansion 时由人+LLM 现读 `wiki/insights` 临时推理
 
-**与「禁止伪方向切换」(第 4 节)的关系**:那条规则正是 Expansion 阶段的剪枝器,在选定 family 内推理新机制时,调参/换序/换 gate 不算新机制。Selection 不管这个(它只输出 family 推荐),由 Expansion 这一步执行掉。
+**与「禁止伪方向切换」(第 4 节)的关系**:那条规则正是 Expansion 阶段的剪枝器,在选定 family 内推理新机制时,调参/换序/换 gate 不算新机制。Selection 不管这个(它只输出 family 选择),由 Expansion 这一步执行掉。
 
 ## 文献搜索:整棵搜索树榨干时才解锁的全新 arm
 
-这是 ③ 成本门控梯子的**最顶一档**:`cheap → medium → expensive(图内) → 文献(图外)`,越往上越贵、解锁条件越严。前三档都在**已知 family 集合内**跳转(图内 explore,便宜)。但 family 集合本身可能被同一组 insight 墙封顶——这时再怎么跳都跳不出去,需要给搜索树根接一棵**全新子树**。
+这是 ④ 成本门控梯子的**最顶一档**:`cheap → medium → expensive(图内) → 文献(图外)`,越往上越贵、解锁条件越严。前三档都在**已知 family 集合内**跳转(图内 explore,便宜)。但 family 集合本身可能被同一组 insight 墙封顶——这时再怎么跳都跳不出去,需要给搜索树根接一棵**全新子树**。
 
-**解锁条件(从严,贵所以严)**:所有已知 family 的 UCB 都跌破地板——即 n=0 的开阔 family(init/PC 等)也已试穿、且 exploit 项全部转负(无 family 仍在涨)。这一刻的精确含义是"已知 arm 集合榨干了,缺的不是没走过的枝,而是图外的新机制"。
+**解锁条件(从严,贵所以严)**:已知 family 全部走不通——即 `idea_graph.py` 里 n=0 的开阔 family(init/PC 等)要么已试穿、要么 dormant 全被死墙传染剪掉,且没有任何活 idea 仍在涨(无 exploit 收益)。这一刻的精确含义是"已知 arm 集合榨干了,缺的不是没走过的枝,而是图外的新机制"。
 
 **只在此时**去搜文献:找能绕开 `cb-mm-tradeoff`(minimax↔min-sum 的根本张力)、`global-state-propagation`(跨 job 累积不可预测)这类高入度墙的**新算法范式**——LP/min-cost flow/matching/Lagrangian 等本地图生不出来的东西。搜到的范式当作一个新 family 入 `wiki/ideas`,照常走 by-mechanism 查重(防止文献里的方法其实早以别的名字撞过已知墙)。
 
-**禁止提前解锁**:只要还有 n=0 或 exploit 为正的已知 family,就先在图内试,不准跳去搜文献——文献贵(慢、易跑偏、结果常不对症),它是 explore 旋钮 C→∞ 但内部已无正回报 arm 时的极限,不是日常手段。
+**禁止提前解锁**:只要还有 n=0 的开阔 family、未被预言的 dormant、或仍在涨的活 idea,就先在图内试,不准跳去搜文献——文献贵(慢、易跑偏、结果常不对症),它是「图内已无任何正回报方向」时的极限手段,不是日常手段。
