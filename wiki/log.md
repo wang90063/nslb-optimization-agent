@@ -7,9 +7,17 @@
 
 ## sync
 
-last-synced-version: v473
+last-synced-version: v487
 
 ---
+
+## [2026-06-08] select(loop) | 选 cross_dest pair 分支做 Expansion → 候选机制待 analysis 定
+
+loop 自治选址理由(可审计):PC 本轮唯一开阔 dormant(allow-extra-pc-chain-gate)已封死,family 挖透;global_state 主线 [[actual-global-out]] 已撞 sum-of-peaks 精度边界(上轮约束事实);init/swap 的 dormant 全被高入度死墙预言(min-cost-flow←portfolio-diversity-matters、swap-iter-count←sa-search-exhausted)剪掉。剩余最强 exploit = cross_dest(n=6,活idea=1 [[cross-dest-top3-mixed]] 部分有效,cost=medium)。其 [[cross-dest-width-tuning]] 已封死(宽度/混合系数=伪切换禁区),但封死页结论指明「有效增量主要来自 **pair 分支**」——故走 Expansion:让 analysis 在 pair-swap 的 acceptance/scoring 找结构性不同的新机制,绕开 magic-number-leaves-fragile / p32r4-operator-quality 墙与 candidate回撤/runtime 失败模式。
+
+## [2026-06-08] ingest | v487 PC gate 大case放宽(chain-only) → [[allow-extra-pc-chain-gate]] 封死
+
+放宽 `allow_extra_pc_chain` 对大 case 多跑 2 轮 chain-only 主链 PC:本地 submit_core 902.11→902.00(−0.11)、anchor 266.82→267.61(+0.79 独涨硬红灯),层增量全来自孤立单点。目标大 case 收益不兑现(online_13 仅 +0.01,CB 减分被 CT 抵消)。submit_core online_19 越 7.4s(cand 7.477s vs base 7.145s)撞 [[insight:time-tight-is-real-gate]],废弃。
 
 ## [2026-06-03] ingest | v473 run_swap MM-safe rollback 放宽 → [[run-swap-rollback-relax]] 封死
 

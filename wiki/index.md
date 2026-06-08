@@ -20,10 +20,10 @@
 ### 待试
 - [calibrate-candidate-set](ideas/calibrate-candidate-set.md) — 用线上结果反向校准 candidate 集(最高优先)
 - [min-cost-flow-init](ideas/min-cost-flow-init.md) — LP/min-cost flow 初始分配(2A,工程难度高)
-- [allow-extra-pc-chain-gate](ideas/allow-extra-pc-chain-gate.md) — 大 case 保留 extra PC 但跳 perport_refine(待审计)
 - [swap-iter-count](ideas/swap-iter-count.md) — swap 迭代次数 / LNS in post-PP(待审计)
 
 ### 封死
+- [allow-extra-pc-chain-gate](ideas/allow-extra-pc-chain-gate.md) — 放宽大case PC gate，core −0.11 + online_19 越7.4s
 - [sa-proposal-bias](ideas/sa-proposal-bias.md) — SA 提案偏置(prefport/vote),三次线上回落
 - [sa-max-relax](ideas/sa-max-relax.md) — 松弛 sa_max,MM 恶化
 - [sa-objective-tuning](ideas/sa-objective-tuning.md) — SA objective 微调(global pressure)
