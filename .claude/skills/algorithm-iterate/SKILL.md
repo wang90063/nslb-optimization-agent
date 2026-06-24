@@ -1,5 +1,5 @@
 ---
-description: "想让 NSLB（leaf-spine 网络负载均衡）的 Solution.cpp 跑出更高线上分时，用本 skill——哪怕只是随口一句「再迭代一版」「看还能不能提点分」「换个方向榨点分」也算，不必凑齐整套流程。这条提分线上的任何一环，单独出现也触发：出新版本/提分/榨分/找下一个优化方向；跑评测、对比基线、判断要不要提交（按老流程跑一轮）；针对某个 case 的某项罚分（如 CB）定向优化后重新评测；记账（把线上提交结果更新到排行榜、当天 log、online_ledger 台账）；/loop 连续自转自动挑方向迭代到命中可提交版本再停。核心信号：话里出现 NSLB 提分、Solution.cpp 线上分、再迭代、重新评测、或记录提交结果，就归本 skill。不归本 skill：造新测试用例（用 generate-dataset）、按线上相关性重分层 candidate（用 calibrate-dataset）、纯解释算法或某段代码、只测 g++ 能否编译、普通 git 提交、与本项目无关的开发任务。"
+description: "想让 NSLB（leaf-spine 网络负载均衡）的 Solution.cpp 跑出更高线上分时，用本 skill——哪怕只是随口一句「再迭代一版」「看还能不能提点分」「换个方向榨点分」也算，不必凑齐整套流程。这条提分线上的任何一环，单独出现也触发：出新版本/提分/榨分/找下一个优化方向；跑评测、对比基线、判断要不要提交（按老流程跑一轮）；针对某个 case 的某项罚分（如 CB）定向优化后重新评测；记账（把线上提交结果更新到排行榜、当天 log、online_ledger 台账）；/goal 目标驱动连续自转自动挑方向迭代到命中可提交版本再停。核心信号：话里出现 NSLB 提分、Solution.cpp 线上分、再迭代、重新评测、或记录提交结果，就归本 skill。不归本 skill：造新测试用例（用 generate-dataset）、按线上相关性重分层 candidate（用 calibrate-dataset）、纯解释算法或某段代码、只测 g++ 能否编译、普通 git 提交、与本项目无关的开发任务。"
 trigger: "用户要求优化算法、提分、迭代、尝试新方案"
 ---
 
@@ -19,9 +19,9 @@ trigger: "用户要求优化算法、提分、迭代、尝试新方案"
 
 ## 主线 orchestrator + subagent 分工
 
-本 skill 一轮迭代会读很多大文件(4000+ 行 solver、BOUNDS、scorer)、跑很长的评测、写多个共享文件。把这些全塞进主线 context,会让 context 飞涨——尤其想用 `/loop` 连续自转时,context 越滚越大,几轮就触顶。解法是**主线当 orchestrator,把「读得多/回得少」和「按指令敲字」的活派给 ephemeral subagent**,主线只保留判断与协调。
+本 skill 一轮迭代会读很多大文件(4000+ 行 solver、BOUNDS、scorer)、跑很长的评测、写多个共享文件。把这些全塞进主线 context,会让 context 飞涨——尤其想用 `/goal` 连续自转时,context 越滚越大,几轮就触顶。解法是**主线当 orchestrator,把「读得多/回得少」和「按指令敲字」的活派给 ephemeral subagent**,主线只保留判断与协调。
 
-> **本 skill 必须在主 session 运行,不可塞进 subagent 跑。** 运行时不支持嵌套 subagent(subagent 手里没有 Agent 工具)——若本 skill 自身在某个 subagent 里执行,它就派不出 analysis/impl/eval/wiki-ingest,所有委派静默退化成 inline,context 优化全失效。`/loop` 正是在主 session 驱动它,符合此约束。
+> **本 skill 必须在主 session 运行,不可塞进 subagent 跑。** 运行时不支持嵌套 subagent(subagent 手里没有 Agent 工具)——若本 skill 自身在某个 subagent 里执行,它就派不出 analysis/impl/eval/wiki-ingest,所有委派静默退化成 inline,context 优化全失效。`/goal` 正是在主 session 驱动它,符合此约束。
 
 主线**自己做、绝不外包**的事:橡皮图章方向(读 analysis 回包 + `idea_graph.py` 富图按探索/利用原则裁定)、eval 前 review diff、取舍判断(读 acceptance.md 走红绿灯)、verdict + 思路 slug + wiki 状态迁移的判断、第 7 步阶段自检。这些是 synthesis,一旦外包给隔离 context 的 subagent,极易与主线事实漂移、或丢掉「推翻方向的关键事实」。
 
@@ -43,7 +43,7 @@ trigger: "用户要求优化算法、提分、迭代、尝试新方案"
 CLAUDE.md 的铁律是「评测必须串行」。引入 subagent 后这条铁律有了延伸,务必同时守住:
 
 1. **禁止多个 eval subagent 并行**:solver 用 `clock()` 做时间门控,并行抢 CPU → `time_tight` 误触发 → 分不可复现。一轮只有**一个** eval subagent。
-2. **eval subagent 跑时,主线时段独占**:这期间 orchestrator 不得再派任何会吃 CPU 的 subagent(analysis/impl/wiki-ingest 都得让路),否则等于变相并行。loop 节奏必须是 `造版本 → eval subagent 独占跑 → 判断` 顺序化。
+2. **eval subagent 跑时,主线时段独占**:这期间 orchestrator 不得再派任何会吃 CPU 的 subagent(analysis/impl/wiki-ingest 都得让路),否则等于变相并行。迭代节奏必须是 `造版本 → eval subagent 独占跑 → 判断` 顺序化。
 3. 「能进 subagent」≠「能并行」:把单个串行 eval 放进 subagent 只是为了把逐 case 长输出移出主线 context,eval 本身仍是一个 solver 接一个跑。
 
 ### eval subagent return spec
@@ -147,8 +147,13 @@ analysis 回包硬性含五样:瓶颈定位、改动 hook 点(函数+行号)、*
 | 信号 | 来源 | 触发线 | 到点动作 |
 |------|------|--------|----------|
 | 距上次校准的新提交数 | `online_ledger.md` sync 水位 | ≥3 | 建议跑 `calibrate-dataset` |
-| 方向选址 | `idea_graph.py` 富图(各 family n/活idea/cost、死墙传染、dormant 分桶,见 `references/direction.md`) | 当前 family 已挖透(无活 idea 在涨)或有更值得挖的开阔方向 | 按探索/利用原则换 family(开阔 dormant 优先;被死墙预言的剪掉);图内全枯竭→搜文献。「连续无增量 ≥5」为保底提醒 |
+| 方向选址 | `idea_graph.py` 富图(各 family n/活idea/cost、死墙传染、dormant 分桶,见 `references/direction.md`) | 当前 family 已挖透(无活 idea 在涨)或有更值得挖的开阔方向 | 按探索/利用原则换 family(开阔 dormant 优先;被死墙预言的剪掉);**正要判「图内全枯竭→搜文献/停」前,先过可达性探针门**(见下)。「连续无增量 ≥5」为保底提醒 |
 | 区分度失效 | 最近几版评分:有无「多版同分」或「本地排序与线上反」 | 出现 | 建议跑 `generate-dataset` 造更尖的 case |
+
+> **可达性探针门(判「轴死」前的强制诊断,见 `references/direction.md`「可达性探针」+ `references/scoring.md`「可达性证人 vs 下界 gap」):** 死墙只证明「某类机制够不到这条轴」,从不证明「轴本身没空间」。所以当瓶颈轴的**所有机制都撞墙、你正要写下「图内耗尽」**时,先跑一道机制无关的离线探针(锁其它指标不退、用能表达目标结构的求解器如 CP-SAT 直接 min/max 目标轴,可复用 `scripts/cb_connectivity_probe.py`):
+> - **探针构造出更优解 → 轴重开**:起一个新 architecture/机制 family 去够这个盆地,**不准跳文献/停**。CB 轴就是这样从「四墙封死」被救活的(online_13 单 job CB −54%,load 全不退)。
+> - **探针 proven optimal 且无更优 → 才有资格判轴死**:这比「机制全撞墙」更硬(证的是轴本身),此时进文献门或停。
+> - 自检条把它显式打出来:方向段写成 `当前<family>撞墙→探针<未跑/轴重开/轴proven-sealed>`。
 
 输出格式(一行,放在本轮回复末尾):
 
@@ -162,27 +167,30 @@ analysis 回包硬性含五样:瓶颈定位、改动 hook 点(函数+行号)、*
 
 **手动单轮模式**:`idea_graph.py` 只**产事实供你读**,不自动驱动 idea 生成——挖哪个 family、要不要搜文献仍由你按探索/利用原则定。多个信号同时到点时全部报出,由用户决定先做哪个。没到点就照常 `→ 继续迭代`,不打断节奏。
 
-### 8. loop 自治模式(仅当经 `/loop` 连续自转时启用)
+### 8. goal 目标驱动模式(仅当经 `/goal` 连续自转时启用)
 
-被 `/loop` 驱动连续自转时,没有人在每轮之间拍板,自检条不能只「打印建议」——它要**驱动**下一步。与手动模式的差别只在这一节;前 7 步逐字不变。
+被 `/goal` 驱动连续自转时,没有人在每轮之间拍板,自检条不能只「打印建议」——它要**驱动**下一步。与手动模式的差别只在这一节;前 7 步逐字不变。
+
+> **`/goal` 与手动循环的机制差别(为什么这一节要单独写):** `/goal` 是 Claude Code 内置命令,你给它一个**可验证的完成条件**,每轮跑完由一个独立评估器核「条件达没达成」——没达成就自动开下一轮,达成就停。也就是说「续不续下一轮」的决定权在 harness 的评估器,不在本 skill 的自检。本 skill 这一节的职责相应收敛为:每轮照常**选方向、推进迭代**,并在每轮结束时把「这一版离完成条件还差什么 / 是否已命中可提交版本」讲成评估器能核验的明确事实。**完成条件就设成「迭代到出现一个按 acceptance.md 红绿灯达标的可提交版本」**——这把下面的停止边界天然外化成 `/goal` 的终止条件,语义一致。
 
 **自检到点 → 自动调卫星**(不等人确认):
 
 | 自检信号到点 | 自动动作 | 说明 |
 |------|----------|------|
-| 区分度失效(多版同分/本地与线上反) | 自动调 `generate-dataset` 造更尖的 case | **本地可判,会真触发**——这是 loop 从「902.0x 噪声」里自己爬出来的逃生阀 |
-| 距校准 ≥3/3 | 自动调 `calibrate-dataset` | 计数器只在**线上提交**后才动,而提交需人肉(见下),故 loop 内通常要你提交几次后才到点 |
+| 区分度失效(多版同分/本地与线上反) | 自动调 `generate-dataset` 造更尖的 case | **本地可判,会真触发**——这是连续自转从「902.0x 噪声」里自己爬出来的逃生阀 |
+| 距校准 ≥3/3 | 自动调 `calibrate-dataset` | 计数器只在**线上提交**后才动,而提交需人肉(见下),故自转内通常要你提交几次后才到点 |
+| 瓶颈轴所有机制撞墙、正要判「图内耗尽」 | **自动跑可达性探针**(`scripts/cb_connectivity_probe.py` 改 objective/约束;锁其它指标不退、离线求解器 min/max 目标轴) | **本地可判,会真触发**——这是连续自转**别把活轴误判成死轴**的逃生阀。探针找到更优解→自动起新机制 family 去够盆地、继续迭代;proven optimal 无更优→轴真死,落停止边界兜底项。探针是本地诊断(可不限时/只跑一个最重 case),不上线、不算线上提交,故在自转授权内 |
 | 都没到点 | 读 `idea_graph.py` 富图,按探索/利用原则选 family,继续下一轮迭代 | 开阔 dormant 优先;主线但未挖透则深挖;被死墙预言的剪掉。**选址理由落 `wiki/log.md`**(无人值守可审计性要求) |
 
-> 卫星 skill(generate-dataset/calibrate-dataset)会改数据集文件(造新 case、重分层)。这是自治模式下被显式授权的动作——用户开 `/loop` 时已同意。但**线上提交、改 `Solution.cpp` 基线**不在授权内(见下停止边界)。
+> 卫星 skill(generate-dataset/calibrate-dataset)会改数据集文件(造新 case、重分层)。这是目标驱动模式下被显式授权的动作——用户开 `/goal` 时已同意。可达性探针只读基线输出 + 跑离线求解器产诊断结论(不改数据集、不改 solver、不上线),更在授权内。但**线上提交、改 `Solution.cpp` 基线**不在授权内(见下停止边界)。
 
 **停止边界 = 命中可提交版本就停,交还控制权**:
 
-loop 自转能自动做完「除线上提交外的一切」——造版本、eval subagent 串行评测、取舍判断、记录、按需调卫星。但碰到下面任一情况**必须停下、不再续下一轮**,输出一句话说明为何停、等你介入:
+目标驱动自转能自动做完「除线上提交外的一切」——造版本、eval subagent 串行评测、取舍判断、记录、按需调卫星。但碰到下面任一情况**必须停下、不再续下一轮**:把它讲成评估器能核验的达成事实(命中可提交版本即满足完成条件),输出一句话说明为何停、等你介入:
 
-- **命中可提交版本**:某版按 acceptance.md 红绿灯达到 `core 真涨` 或 `core 平 + candidate 涨`。线上分本地算不出(`online_ledger` 存在的理由),提交动作必须人肉做——loop 到此为止,把版本和证据摆给你。
-- (兜底)**图内所有方向耗尽**:无 n=0 未探索 family、dormant 全被死墙传染剪掉、无活 idea 仍在涨——已无本地可挖方向,需你给新方向或解锁文献搜索。
+- **命中可提交版本**:某版按 acceptance.md 红绿灯达到 `core 真涨` 或 `core 平 + candidate 涨`。线上分本地算不出(`online_ledger` 存在的理由),提交动作必须人肉做——自转到此为止,把版本和证据摆给你,这也正是 `/goal` 的完成条件被满足的点。
+- (兜底)**图内所有方向耗尽 + 瓶颈轴经探针证死**:无 n=0 未探索 family、dormant 全被死墙传染剪掉、无活 idea 仍在涨,**且**当前瓶颈轴已过可达性探针门、判 `proven optimal 且无更优解`(轴 achievability-proven sealed,而非仅「机制全撞墙」)——此时才算真耗尽,需你给新方向或解锁文献搜索。**若探针反而构造出更优解,这不是停止点而是轴重开点**:自转应自动起一个新机制 family 去够那个盆地(下一轮迭代的真问题 = 怎么在 7.4s 门控内逼近探针的离线最优),继续跑而非停。
 
-> 为什么停在「可提交」而非自动提交:线上评测机是唯一本地不可复算的真值源,且提交对外可见、不可逆。这正是 safety 上「影响外部/不可逆动作需人确认」的边界,自治 loop 不跨。
+> 为什么停在「可提交」而非自动提交:线上评测机是唯一本地不可复算的真值源,且提交对外可见、不可逆。这正是 safety 上「影响外部/不可逆动作需人确认」的边界,自治自转不跨。`/goal` 的完成条件设成「可提交」而非「已提交」,正好把这条边界焊死在 harness 层。
 
-**loop 一轮的固定节奏**(守评测铁律):`analysis subagent(瓶颈+查重+方向) → 主线裁定方向 → impl subagent 造版本 → eval subagent 独占串行跑 → 主线判断 → wiki ingest subagent 记录 → 自检驱动`。eval subagent 跑时主线不派别的吃 CPU 的活;analysis 安排在 impl 前、与 eval 错峰。
+**一轮的固定节奏**(守评测铁律):`analysis subagent(瓶颈+查重+方向) → 主线裁定方向 → impl subagent 造版本 → eval subagent 独占串行跑 → 主线判断 → wiki ingest subagent 记录 → 自检驱动`。eval subagent 跑时主线不派别的吃 CPU 的活;analysis 安排在 impl 前、与 eval 错峰。

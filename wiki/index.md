@@ -16,10 +16,10 @@
 ### 部分有效
 - [cross-dest-top3-mixed](ideas/cross-dest-top3-mixed.md) — cross_dest top-3 mixed scoring + v369 基线 audit(369.86)
 - [time-tight-threshold-relax](ideas/time-tight-threshold-relax.md) — time_tight 放宽到 7.0s + 去掉 el>3&&fl>20k(369.89)
+- [global-cbsat-relabel](ideas/global-cbsat-relabel.md) — 换架构:CP-SAT 锁 load-硬约束 min CB,probe 证 CB-连通(online_13 job25 −54%,无版本待实现)
 
 ### 待试
 - [calibrate-candidate-set](ideas/calibrate-candidate-set.md) — 用线上结果反向校准 candidate 集(最高优先)
-- [min-cost-flow-init](ideas/min-cost-flow-init.md) — LP/min-cost flow 初始分配(2A,工程难度高)
 - [swap-iter-count](ideas/swap-iter-count.md) — swap 迭代次数 / LNS in post-PP(待审计)
 
 ### 封死
@@ -58,6 +58,7 @@
 - [pressure-order-candidates](ideas/pressure-order-candidates.md) — pressure-order 候选族,伤 proxy
 - [generic-coordinated-beam](ideas/generic-coordinated-beam.md) — 通用协调 beam,未转化
 - [csp-greedy](ideas/csp-greedy.md) — CSP 贪心/扩展 repair/rank tie-break,未转化
+- [min-cost-flow-init](ideas/min-cost-flow-init.md) — LP/min-cost flow 初始分配,MCF 不可表达 CB + 起点被 PP 抹平(分析剪枝无版本)
 
 ## ideas — 按家族分组(family)
 
@@ -93,3 +94,10 @@
 - [magic-number-leaves-fragile](insights/magic-number-leaves-fragile.md) — 泛化风险源自 magic-number 子叶
 - [time-tight-is-real-gate](insights/time-tight-is-real-gate.md) — time_tight 砍后段 price 分支
 - [runtime-7.4s-acceptable](insights/runtime-7.4s-acceptable.md) — 线上单 case 时限 >7.4s
+- [mcf-cannot-express-cb](insights/mcf-cannot-express-cb.md) — MCF/线性可分离流模型无法表达 CB(cross-phase 集合耦合)
+- [cb-pincered-no-wall-gap](insights/cb-pincered-no-wall-gap.md) — CB 被 sa-search-exhausted/cb-mm-tradeoff 两墙无缝夹击,无空白可钻
+- [cbsat-runtime-infeasible](insights/cbsat-runtime-infeasible.md) — 全局 CP-SAT 在线 min CB 7.4s 内产不出可用解(第一个可行解 7.95s 且劣于 baseline),per-job 限时 CP-SAT 上线否决
+- [cb-win-diffuse-across-cards](insights/cb-win-diffuse-across-cards.md) — CP-SAT 的 CB 增益弥散在 472/2757 卡各小幅收敛,非少数热卡,廉价提炼不成立 → 指向强化 run_port_consistency
+- [cbsat-runtime-bound](insights/cbsat-runtime-bound.md) — CB 轴 achievability-open(offline −54%)、SOLVER-BOUND 非结构封死:probe 6 实测孤立 blob 2.32s(lean)打平 baseline(推翻 probe5「>18s」类比),瓶颈是 solver/编码效率可攻
+- [cb-dual-decomp-symmetry-gap](insights/cb-dual-decomp-symmetry-gap.md) — 对偶分解(Lagrangian/ADMM,价格解耦 coupling)对 CB 也结构性失效:价格对 CB 零杠杆 + 端口对称性致 overload 永久振荡不收敛,且 8.58s/sweep/job 越门控
+- [cb-solver-swap-no-help](insights/cb-solver-swap-no-help.md) — 换 off-the-shelf solver 救不了 CB blob:Gecode 30s 0 解/HiGHS flatten 3.64s/Chuffed 无 formula,CP-SAT 已是通用工具最好 → 「更高效 SAT」是写 C++ 专用传播非换 solver

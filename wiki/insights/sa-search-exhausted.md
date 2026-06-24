@@ -13,6 +13,8 @@ evidence: [v283, v292, v294, v271, v277]
 
 解已落在深度局部最优,扩展管线无效。要再进必须换结构性不同的 operator(multi-flow move、不同问题分解),而非继续调 SA。
 
+**[2026-06-14 范围澄清]** 本结论的封死范围**仅限 local 搜索 / load-neutral 纯重排 / 可分离边成本模型**。CP-SAT 全局联合求解(锁 load-no-worse 硬约束、表达集合 XOR 直接 min CB)**不在封死范围内**——probe 已证 load-最优域 CB-连通(online_13 job25 CB 1129→525,−54%,load 全不退,下界 36)。见 [[global-cbsat-relabel]]。CB 轴重开,封死的是『用局部/可分离手段削 CB』而非『CB 本身可削空间』。
+
 ## 关系
 
 - sa_max 为何不能松 → [[insight:cb-mm-tradeoff]]

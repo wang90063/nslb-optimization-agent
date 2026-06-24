@@ -12,7 +12,7 @@ local: "candidate 强"
 
 **当前线上最佳:370.15。** 两个改动合成:
 1. **actual global_out**:用真实 max-phase-load 更新 global_out,去掉 pre_ct_mo 保守值。证明 global_out 准确性直接影响 MM——保守值导致后续 job 过度回避某些端口,造成负载不均
-2. **CB-aware greedy portfolio**(v447):在 portfolio 层提供 CB 多样性(不是在 better_metrics 注入 CB)
+2. **CB-aware greedy portfolio**(v447):在 portfolio 层提供 CB 多样性(不是在 better_metrics 注入 CB)。该支的进一步变体(v490 shuffle 重启注入 CB 起点多样性)已封死,见 [[greedy-cb-awareness]]——第 2 支已挖透,主线的提分潜力集中在已落地的 v447,无更多可挖变体。
 
 这是唯一一次成功「动 global_out」——与 [[ct-propagation]] 的失败形成对照:ct-propagation 改 global_out 的方式是去掉 conservative state 让改进传播(有害),而这里是把保守的近似值换成真实值(去掉错误,有益)。
 

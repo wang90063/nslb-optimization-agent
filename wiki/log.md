@@ -7,9 +7,41 @@
 
 ## sync
 
-last-synced-version: v487
+last-synced-version: v490 (本条 ingest 为无版本分析剪枝,不推进水位)
 
 ---
+
+## [2026-06-15] probe | solver bake-off:换通用 solver 救不了 CB blob,真杠杆是 C++ 专用传播(无版本): 用户「都试试」。加 `--dump-mzn` 把孤立 blob CB-min 导成自包含 MiniZinc(2321 flow/484 CB pair/3584 cap),装 minizinc+gecode(brew)对比三类通用 solver:CP-SAT(lean,lazy-clause+presolve+hint)**2.32s 打平**;Gecode(经典 CP)**30s 0 解**(=====UNKNOWN=====,18027 节点/6.8M 传播,连首个可行解都没到);HiGHS(MIP)插件 dylib 损坏,但 flatten 即产 96342 int 变量/flatTime 3.64s(光展平越门控);Chuffed(LCG,本想测)macOS 无 brew formula 且 diagnostic-only 不能上线。→ 结论:这批通用 solver 里 **CP-SAT 已接近最优**,「更高效 SAT」不是换 solver(已证更差/不可得),而是写**问题特定 C++ 传播**跳过 model-build/flatten 海(通用 solver 固定开销大头)、原生表达 set-XOR+cap。新增 insight [[cb-solver-swap-no-help]]。三条文献/solver 路全测完(对偶分解撞结构 gap、通用 solver 换不动、full-job 撞 build),**唯一活的落地路径锁定 = C++ per-blob 二次扫**(距门控 ~5×,工程可达)。
+
+## [2026-06-15] probe | per-case blob 预算实测:门控差距=~5×(非 100×),全 35 job blob 都秒级打平,blob-CB 总量 −73%(无版本): 接 blob 实测,加 `--case-budget`(逐 job 解最大耦合 blob lean-CB-min,记 first-beat,求和 vs 整 case 7.4s 门控)。online_13 全 35 job 结果:**35/35 job 的 blob 都打平 baseline**(无 never),first-beat 求和 **35.16s vs 7.4s 门控 → ~5× over**;轻 job 0.2-0.6s,重 job(25)2.31s。blob-CB 总量 **3111→830(−73%)**——比单 job 探针暗示的可达 CB 大得多,是全 case CB headroom 主体。**关键重构:** 门控差距从 probe5 full-job 类比的「~100× 无望」收敛到**实测 ~5×**。这把 CB 从「需研究突破」降级为「需工程移植」:distilled C++ per-blob 启发式 vs CP-SAT 通常省 10-100×(无 model-build/solver 开销),~5× 落在该区间内。CB 轴判定再升级:solver-bound 且**差距已量化在工程可达范围**。更新 [[cbsat-runtime-bound]]、[[global-cbsat-relabel]]。下一步:测 Chuffed/LCG on blob(是否再省一个量级)+ 设计 C++ per-blob 二次扫机制(给 run_port_consistency 加 load-aware blob 协同 pass)。
+
+## [2026-06-15] probe | blob 实测推翻 probe5 类比:孤立耦合 blob 2.32s 打平 baseline,CB 轴从 runtime-bound 改判 SOLVER-bound(无版本): 用户问「更高效 SAT 呢」。识别 probe 5 的「cluster-joint≈full-job≈>18s→runtime-bound sealed」是**规模类比非测量**(falsify-first 纪律:别用类比封轴)。给 `cb_connectivity_probe.py` 加 `--blob`(孤立解最大耦合 blob,其它 in-job 卡固定,测 first-beat-baseline)+ `--blob-lean`(纯一热编码,去 IntVar + 2p reified channeling)。实测 online_13 最大 blob(~800-844 卡/2155-2243 flow):非-lean first-beat **4.90s**(blob-CB 314→30);**lean first-beat 2.32s**(338→55,first incumbent 2.06s)。→ 推翻 >18s 类比:孤立 blob ≪ full-job(CP-SAT 超线性),CB 轴是 **solver-bound/finite-but-slow 非 structurally-hard**。lean 把 first-beat 砍半(距 0.21s/job 门控份额从 23× 收到 11×),实证编码/build 开销是 first-beat 真实瓶颈且可攻 → 「更高效 SAT(LCG/Chuffed/leaner encoding)」是唯一有真实空间的杠杆(对比对偶分解撞结构 gap、full-job 撞 build 吃门控,均不可攻)。修正 [[cbsat-runtime-bound]](从结构封死改判可攻 regime)。仍未跨坎:距门控 ~11× 且整 case 35-job blob 共享 7.4s + blob-外卡固定近似。下一步明确:测 Chuffed/LCG on blob + per-case blob 预算核算。**CB 轴从 sealed 重新打开为 active solver-efficiency 方向。**
+
+## [2026-06-15] probe | 对偶分解(Lagrangian)解 CB——最后一条可分解范式,经探针证结构性死(无版本): 用户给文献路径「ms 级跨卡 set-XOR 协同求解器」,识别出 dual decomposition 是 probe 1-5 唯一没碰且映射问题结构(separable-except-shared-resource)的范式——把 coupling cap 对偶成 per-cell price,Lagrangian separate 成 per-card priced 子问题,subgradient 更新 price,正补 probe 4 硬-cap fixpoint 缺口。给 `cb_connectivity_probe.py` 加 `--lagrangian`。实测 online_13 job25(2757 卡)两组参数(step=200 / step=15×30sweep):job_CB 全程=0 但 overload 永远在 30-42 band 振荡**从不到 0**。双层结构性根因:(1)价格对 CB **零杠杆**(CB=0 对每卡任意单端口 trivially 可达,价格只能挪卡缓解 overload 动不了 CB);(2)**端口对称性致对偶不收敛**(2757 卡挤少数低价端口,subgradient 只搬运 overload 无「哪卡占哪端口」协调信号)——同 [[port-relabel-collapses-to-neutral-swap]] 在对偶优化层复现。runtime 独立致命:8.58s/sweep/单 job,30 sweep=257s 仍不收敛,门控是整 35-job case 的 7.4s。新增 insight [[cb-dual-decomp-symmetry-gap]]。CB 轴判定升级:从「机制全撞墙」到「含对偶分解的可分解范式集合也撞结构性对偶 gap」。解锁仍需三条外部路径,且新范式必须能打破端口对称性(对偶做不到)。
+
+## [2026-06-15] goal-stop | 图内+瓶颈轴双重耗尽确认(§8 兜底停止点,无版本): analysis 复核 baseline v454(core 902.03/cand 455.54/online 370.15 与 Solution.cpp 一致),逐轴封死表——MS/MM/CI=bounds-sealed(整数地板)、CB=runtime-bound sealed(本会话 5 探针:offline −54% 真存在但 7.4s 门控够不到,per-card CD 恢复 0% + 耦合塌 3 个 ~2200-flow blob)、CT=mechanism-sealed。global_state 主线唯一活杠杆=MM(已 bounds-sealed),且改 global_out 精度结构上动不了 CB(标量累加器编码不了 per-card phase-set 结构)→ actual-global-out 攻的轴封死。无 gate-tractable 活 family 变体。解锁需:放宽门控(~20s+)/ 新文献范式(ms 级 ~2200-flow 跨卡 set-XOR 求解器)/ 换问题口径(batch/非交互求解)。这是 §8「图内所有方向耗尽 + 瓶颈轴经探针证死」的合法停止点(非轴重开:探针证 runtime-bound 而非构造出更优解),交还控制权待用户给新方向或解锁文献搜索。
+
+## [2026-06-15] direction | CB 轴 runtime-bound sealed 后选址(goal 自转,无人值守可审计): 读 idea_graph 富图,仅 2 family 有活 idea——global_state/actual-global-out(●主线,n=3,cost=cheap)、cross_dest/cross-dest-top3-mixed(◐部分,n=7,cost=medium);其余全封死。按 exploit(①主线收益)+cost(④便宜优先)选 global_state 深挖。剪掉:init(min-cost-flow/per-phase 均封死)、greedy(n=52 挖透)、SA/CT/PC(撞 cb-mm-tradeoff/sa-search-exhausted)、other/calibrate-candidate-set(是校准非提分,且 0/3 未到点)。待 analysis 确认 actual-global-out 攻的轴未封死(若推 load=bounds-sealed 或 CB=runtime-sealed 则该 family 活在图但死在轴)
+
+## [2026-06-14] probe | global-cbsat-relabel runtime+relabel 探针(无版本): full CP-SAT 7.4s内0%cut(第一个可行解7.95s且劣于baseline)→候选(a)否决; CB增益弥散472/2757卡各小幅收敛→候选(b)廉价版否决; 新增 insight cbsat-runtime-infeasible / cb-win-diffuse-across-cards; 形态指向图内强化PC,待用户裁定三分叉
+
+## [2026-06-14] probe | CB 轴重开: CP-SAT probe 证 load-最优域 CB-连通(online_13 job25 1129→525 −54% load不退 下界36); 新 idea global-cbsat-relabel; 给 cb-pincered-no-wall-gap/sa-search-exhausted 加范围澄清
+
+## [2026-06-14] ingest | 文献搜索剪枝(无版本): PP后 load-neutral 降 CB 机制可证不存在; CB 被 sa-search-exhausted/cb-mm-tradeoff 无缝夹击; 新增 insight cb-pincered-no-wall-gap
+
+## [2026-06-14] ingest | min-cost-flow-init 封死(分析剪枝无版本): MCF 不可表达 CB(cross-phase 集合耦合) + 起点被 PP 抹平; 新增 insight mcf-cannot-express-cb
+
+## [2026-06-14] probe+insight | v491 MM 定点削峰方向:探针测到 submit_core MM gap +0.25(潜在+0.27),经 mm-tight-bound-unreachable 确认是整数舍入幻影(MM 已达可达下界)+ solver L2875 已实现 peak-min + stage-mm-then-cb 已封死 → 否决;沉淀方法论教训:下界探针 gap≠可榨空间
+
+## [2026-06-14] insight | v491 图外方向「load-neutral 端口标签置换」解析证伪 → 塌缩进 run_neutral_swap(sa-search-exhausted 范式);新 insight port-relabel-collapses-to-neutral-swap;堵死「利用 scorer 端口编号不变性免费降 CB」一类想法
+
+## [2026-06-14] ingest | v490 cb_aware shuffle 重启 → 废弃(core −0.24,p32 CB 起点被 PP 抹平,online_3 越 7.4s);greedy-cb-awareness 封死范围扩大到 portfolio 起点;actual-global-out 第2支挖透
+
+## [2026-06-13] ingest | v489 cross_dest overflow 降权 → 废弃(core −0.51 方向一致 + hard_19 8.123s 越线);新 insight static-overflow-predict-misfits-pairwise-swap;cross-dest-top3-mixed 维持部分有效
+
+## [2026-06-09] select(goal) | 选 swap/neutral_swap 做 Expansion → CB-aware 等价组搜索起点(待实现 v488)
+
+/goal 无人值守选址理由(可审计):本轮重跑 idea_graph 富图 + analysis 侦察。剪枝:PC family v487 刚封死([[allow-extra-pc-chain-gate]])、global_state 主线 [[actual-global-out]] 已撞 sum-of-peaks 精度边界、init/swap-iter-count dormant 全被高入度死墙预言剪掉([[min-cost-flow-init]]←portfolio-diversity-matters、[[swap-iter-count]]←sa-search-exhausted)。BOUNDS + [[insight:remaining-space-cb-p32r4]] + [[insight:p32r4-operator-quality]] 一致指向唯一剩余窗口 = p32/r4 的 CB(Cbtphsc),但「抠 global_price 比较器」子机制已被 v392–v397 噪声化、v472 ungate 已封死。analysis 给出三候选(neutral_swap CB-aware 起点 / PC per-phase 固定 / greedy CB tie-break)。主线裁定:取 neutral_swap(Option A)——swap family 封死的都是 single-flow/multi-flow/block-move/ejection/rollback-relax/gsz 等**别的** operator,neutral_swap 本身从未单独 attack 过,属「改信息利用方式」型新机制非伪切换;等价流(同 sl/dl/pmask)交换只换端口标签、不改端口总负载→不踩 [[insight:cb-mm-tradeoff]],用本地 backup→不踩 [[insight:global-state-propagation]]。剪掉 Option B(PC 调强度=伪切换,family 已穷尽)、Option C(改 greedy local price 经 global_out 累积撞 global-state-propagation,接近已封死 [[cheap-path-global-price-compare]])。上轮 06-08 的 cross_dest pair select 未落地,本轮经新 analysis 重评后 neutral_swap 绕死墙论证更干净(cross_dest 经 cd_max_out/in 评估 load 有踩 MM 风险),故 pivot。
 
 ## [2026-06-08] select(loop) | 选 cross_dest pair 分支做 Expansion → 候选机制待 analysis 定
 

@@ -15,6 +15,8 @@ closed_on: 2026-05-31
 
 但当前 portfolio + better_metrics(jm/fg 优先)本质已是这个模式;而 post-processing 的 sa_max 比「不恶化 MM」更紧(不允许任何端口 max 增长,即使不影响全局 MM)。把 sa_max 放松成「global_out+new_max ≤ current_fg」的 balanced 版本(v443/v445)仍通过累积恶化 MM。根因:当前 job 非瓶颈端口可能是后续 job 瓶颈,无法预测。
 
+v491 从相反角度(定点削最热端口降 MM,而非先 MM 后 CB 分阶段)再次确认这条根因——任何主动降已触底 MM 的尝试都撞 [[insight:cb-mm-tradeoff]](降 MM 必摊开端口→抬 CB)+ MM 本身已不可达([[mm-tight-bound-unreachable]])。
+
 ## 关系
 
 - 对立根因 → [[insight:cb-mm-tradeoff]] [[insight:global-state-propagation]]
